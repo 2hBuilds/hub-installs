@@ -45,8 +45,8 @@ def client_version(bootstrap):
     if not isinstance(artifacts, list):
         raise FetchError("bootstrap.json has no 'artifacts' list")
     for artifact in artifacts:
-        name = artifact.get("name", "") if isinstance(artifact, dict) else ""
-        if not name.startswith("client"):
+        name = artifact.get("name") if isinstance(artifact, dict) else None
+        if not isinstance(name, str) or not name.startswith("client"):
             continue
         if artifact.get("version"):
             return str(artifact["version"])
@@ -63,16 +63,25 @@ def parse_counts(feed):
     counts = {}
     for slug, n in feed.items():
         # bool is a subclass of int; a true/false count would be a parse failure
-        if not isinstance(n, int) or isinstance(n, bool):
-            raise FetchError("pluginhub feed has a non-integer count for %r: %r" % (slug, n))
+        if not isinstance(n, int) or isinstance(n, bool) or n < 0:
+            raise FetchError("pluginhub feed has a bad count for %r: %r" % (slug, n))
         counts[slug] = n
     return counts
 
 
 def read_tracked(path):
-    with open(path, encoding="utf-8") as f:
-        lines = (line.strip() for line in f)
-        return [line for line in lines if line and not line.startswith("#")]
+    """Slugs from plugins.txt: # starts a comment, blanks and repeats are dropped.
+
+    utf-8-sig because Windows Notepad may save the file with a byte-order mark,
+    which would otherwise become part of the first slug.
+    """
+    slugs = []
+    with open(path, encoding="utf-8-sig") as f:
+        for line in f:
+            slug = line.split("#", 1)[0].strip()
+            if slug and slug not in slugs:
+                slugs.append(slug)
+    return slugs
 
 
 def write_text(path, text):
@@ -137,11 +146,15 @@ def run(root=ROOT, fetch=None, today=None):
     return missing
 
 
-def main():
+def main(root=ROOT):
     try:
-        run()
+        run(root)
     except (FetchError, OSError, csv.Error) as e:
         print("error: %s" % e, file=sys.stderr)
+        return 1
+    except Exception as e:
+        # a feed of a shape nobody foresaw; still one line and a non-zero exit
+        print("error: unexpected %s: %s" % (type(e).__name__, e), file=sys.stderr)
         return 1
     return 0
 

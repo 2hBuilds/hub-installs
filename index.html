@@ -69,7 +69,7 @@
 			<button type="button" data-days="30">30d</button>
 			<button type="button" data-days="90">90d</button>
 			<button type="button" data-days="365">1y</button>
-			<button type="button" data-days="0" aria-pressed="true">all</button>
+			<button type="button" data-days="0">all</button>
 		</div>
 		<div class="chart"><canvas id="chart" aria-label="Installs per day for each tracked plugin"></canvas></div>
 	</section>
@@ -204,13 +204,15 @@ async function load() {
 			fetch("data/latest.json", { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error("data/latest.json: " + r.status); return r.json(); })
 		]);
 		const series = parseSeries(csvText);
-		const slugs = Object.keys(series);
-		const dates = [...new Set(slugs.flatMap(s => Object.keys(series[s])))].sort();
+		const dates = [...new Set(Object.values(series).flatMap(Object.keys))].sort();
 		if (!dates.length) {
 			note.textContent = "No data yet.";
 			return;
 		}
 		const firstDate = dates[0], lastDate = dates[dates.length - 1];
+		// Every run writes a row for each slug in plugins.txt, so the slugs with a row on
+		// the last day are the ones tracked now; a removed plugin drops off the page.
+		const slugs = Object.keys(series).filter(s => lastDate in series[s]);
 		note.textContent = `Latest data: ${latest.date} (UTC), RuneLite ${latest.version}, `
 			+ `${fmt(Object.keys(latest.counts).length)} plugins on the Hub. `
 			+ `History from ${firstDate}.`;
@@ -222,7 +224,8 @@ async function load() {
 			renderChart(series, slugs, firstDate, lastDate, days);
 		};
 		buttons.forEach(b => b.addEventListener("click", () => show(+b.dataset.days)));
-		show(0);
+		// "all" while the history is short, the last year once it is longer than that
+		show(toTime(lastDate) - toTime(firstDate) < 365 * DAY ? 0 : 365);
 	} catch (e) {
 		note.textContent = "Could not load the data (" + e.message + "). The page must be served over http, not opened as a file.";
 	}

@@ -51,6 +51,10 @@ class ClientVersionTest(unittest.TestCase):
         bootstrap = {"artifacts": [{"name": "okio-1.17.2.jar"}, {"name": "client-9.9.9.jar", "version": "1.2.3"}]}
         self.assertEqual(fetch_installs.client_version(bootstrap), "1.2.3")
 
+    def test_an_artifact_without_a_name_is_skipped(self):
+        bootstrap = {"artifacts": [{"name": None}, {"path": "x"}, "junk", {"name": "client-1.12.39.jar"}]}
+        self.assertEqual(fetch_installs.client_version(bootstrap), "1.12.39")
+
     def test_no_client_artifact_is_an_error(self):
         with self.assertRaises(fetch_installs.FetchError):
             fetch_installs.client_version({"artifacts": [{"name": "okio-1.17.2.jar"}]})
@@ -71,6 +75,21 @@ def write_plugins(root, *slugs):
 def read_series(root):
     with open(os.path.join(root, "data", "installs.csv"), encoding="utf-8", newline="") as f:
         return list(csv.reader(f))
+
+
+class TrackedTest(unittest.TestCase):
+    def read(self, text, encoding="utf-8"):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "plugins.txt")
+            with open(path, "w", encoding=encoding) as f:
+                f.write(text)
+            return fetch_installs.read_tracked(path)
+
+    def test_a_byte_order_mark_is_not_part_of_the_first_slug(self):
+        self.assertEqual(self.read("a\nb\n", encoding="utf-8-sig"), ["a", "b"])
+
+    def test_comments_blanks_inline_notes_and_repeats(self):
+        self.assertEqual(self.read("# head\n\na\n  b # mine\na\n#c\n"), ["a", "b"])
 
 
 class SeriesTest(unittest.TestCase):
@@ -120,23 +139,40 @@ class FailureTest(unittest.TestCase):
             write_plugins(root, "a")
             fetch_installs.run(root, fake_fetch({"a": 1}), "2026-09-26")
             before = read_series(root)
-            for bad in ({}, [], {"a": "many"}, {"a": True}):
+            for bad in ({}, [], {"a": "many"}, {"a": True}, {"a": -1}):
                 with self.assertRaises(fetch_installs.FetchError):
                     fetch_installs.run(root, fake_fetch(bad), "2026-09-27")
             self.assertEqual(read_series(root), before)
+
+    def main_with(self, fetch):
+        original = fetch_installs.fetch_json
+        fetch_installs.fetch_json = fetch
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                write_plugins(root, "a")
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    code = fetch_installs.main(root)
+                self.assertFalse(os.path.exists(os.path.join(root, "data")))
+            return code, err.getvalue()
+        finally:
+            fetch_installs.fetch_json = original
 
     def test_main_exits_non_zero_on_a_fetch_failure(self):
         def broken(url):
             raise fetch_installs.FetchError("no network")
 
-        original = fetch_installs.fetch_json
-        fetch_installs.fetch_json = broken
-        try:
-            with contextlib.redirect_stderr(io.StringIO()) as err:
-                self.assertEqual(fetch_installs.main(), 1)
-            self.assertIn("no network", err.getvalue())
-        finally:
-            fetch_installs.fetch_json = original
+        code, err = self.main_with(broken)
+        self.assertEqual(code, 1)
+        self.assertIn("error: no network", err)
+
+    def test_main_exits_non_zero_with_one_line_on_an_unforeseen_error(self):
+        def odd(url):
+            raise KeyError("artifacts")
+
+        code, err = self.main_with(odd)
+        self.assertEqual(code, 1)
+        self.assertEqual(err, "error: unexpected KeyError: 'artifacts'\n")
+
 
 if __name__ == "__main__":
     unittest.main()
