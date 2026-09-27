@@ -1,0 +1,4 @@
+# Plugin Hub slugs to track, one per line (the name in the plugin's Hub URL,
+# e.g. runelite.net/plugin-hub/show/<slug>). To track another plugin, add its
+# slug on a new line - nothing else is needed. Lines starting with # are ignored.
+bank-portfolio-tracker

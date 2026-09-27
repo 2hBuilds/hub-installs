@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plugin Hub installs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
+<style>
+	:root {
+		--bg: #232323;
+		--card: #171717;
+		--text: #ffffff;
+		--muted: #a8a8a8;
+		--line: #2e2e2e;
+		--accent: rgb(220, 138, 0);
+		--rise: rgb(38, 168, 49);
+		--fall: rgb(196, 48, 48);
+	}
+	* { box-sizing: border-box; }
+	body {
+		margin: 0;
+		background: var(--bg);
+		color: var(--text);
+		font-family: Lato, sans-serif;
+		font-size: 15px;
+	}
+	main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+	h1 { font-size: 24px; margin: 0 0 4px; }
+	h2 { font-size: 16px; margin: 0 0 12px; }
+	.note { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+	.card { background: var(--card); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+	.ranges { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+	.ranges button {
+		font: inherit;
+		font-size: 13px;
+		color: var(--text);
+		background: transparent;
+		border: 1px solid var(--line);
+		border-radius: 4px;
+		padding: 4px 12px;
+		cursor: pointer;
+	}
+	.ranges button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+	.chart { position: relative; height: 320px; }
+	.plugins .card { margin-bottom: 0; }
+	.plugins { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+	.plugins h2 { display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+	.swatch { width: 12px; height: 3px; border-radius: 2px; flex: none; }
+	table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+	th { text-align: left; font-weight: 400; color: var(--muted); padding: 6px 0; }
+	td { text-align: right; padding: 6px 0; }
+	tr + tr th, tr + tr td { border-top: 1px solid var(--line); }
+	.rise { color: var(--rise); }
+	.fall { color: var(--fall); }
+	.blank { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+	<h1>Plugin Hub installs</h1>
+	<p class="note" id="note">Loading...</p>
+
+	<section class="card">
+		<div class="ranges" id="ranges" role="group" aria-label="Time range">
+			<button type="button" data-days="7">7d</button>
+			<button type="button" data-days="30">30d</button>
+			<button type="button" data-days="90">90d</button>
+			<button type="button" data-days="365">1y</button>
+			<button type="button" data-days="0" aria-pressed="true">all</button>
+		</div>
+		<div class="chart"><canvas id="chart" aria-label="Installs per day for each tracked plugin"></canvas></div>
+	</section>
+
+	<section class="plugins" id="plugins"></section>
+</main>
+
+<script>
+// Fixed order, checked for colour-blind separation on the #171717 card; a sixth
+// plugin and beyond reuse the hues with a dashed line so no two series look alike.
+const COLOURS = ["rgb(220,138,0)", "#3987e5", "#199e70", "#9085e9", "#d55181"];
+const DAY = 86400000;
+
+const toTime = d => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10));
+const toDate = t => new Date(t).toISOString().slice(0, 10);
+const fmt = n => n.toLocaleString("en-US");
+const signed = n => (n > 0 ? "+" : n < 0 ? "−" : "") + fmt(Math.abs(n));
+
+function parseSeries(text) {
+	// date,plugin,installs -> {slug: {date: installs or null}}
+	const series = {};
+	for (const line of text.trim().split(/\r?\n/).slice(1)) {
+		const [date, slug, raw] = line.split(",");
+		if (!date || !slug) continue;
+		(series[slug] = series[slug] || {})[date] = raw === "" || raw === undefined ? null : Number(raw);
+	}
+	return series;
+}
+
+// The value on the latest day at or before `date` that has one.
+function valueAtOrBefore(byDate, date) {
+	const days = Object.keys(byDate).filter(d => d <= date && byDate[d] !== null).sort();
+	return days.length ? byDate[days[days.length - 1]] : null;
+}
+
+function change(byDate, lastDate, days) {
+	const now = byDate[lastDate];
+	const then = valueAtOrBefore(byDate, toDate(toTime(lastDate) - days * DAY));
+	return now === null || now === undefined || then === null ? null : now - then;
+}
+
+function changeCell(value) {
+	if (value === null) return '<td class="blank"></td>';
+	const cls = value > 0 ? "rise" : value < 0 ? "fall" : "";
+	return `<td class="${cls}">${signed(value)}</td>`;
+}
+
+function swatch(i) {
+	const c = COLOURS[i % COLOURS.length];
+	return i < COLOURS.length ? c : `repeating-linear-gradient(90deg, ${c} 0 4px, transparent 4px 6px)`;
+}
+
+function renderCards(series, slugs, lastDate, latest) {
+	const all = Object.values(latest.counts);
+	const holder = document.getElementById("plugins");
+	holder.innerHTML = "";
+	slugs.forEach((slug, i) => {
+		const byDate = series[slug];
+		const now = byDate[lastDate];
+		const count = latest.counts[slug];
+		const rank = count === undefined ? null : 1 + all.filter(n => n > count).length;
+		const card = document.createElement("section");
+		card.className = "card";
+		card.innerHTML = `
+			<h2><span class="swatch" style="background:${swatch(i)}"></span><span></span></h2>
+			<table>
+				<tr><th>Installs</th><td>${now === null || now === undefined ? '<span class="blank">not in the feed</span>' : fmt(now)}</td></tr>
+				<tr><th>Change, 1 day</th>${changeCell(change(byDate, lastDate, 1))}</tr>
+				<tr><th>Change, 7 days</th>${changeCell(change(byDate, lastDate, 7))}</tr>
+				<tr><th>Change, 30 days</th>${changeCell(change(byDate, lastDate, 30))}</tr>
+				<tr><th>Hub rank</th><td>${rank === null ? '<span class="blank">-</span>' : `${fmt(rank)} of ${fmt(all.length)}`}</td></tr>
+			</table>`;
+		card.querySelector("h2 span:last-child").textContent = slug;
+		holder.appendChild(card);
+	});
+}
+
+let chart;
+
+function renderChart(series, slugs, firstDate, lastDate, days) {
+	const start = days ? Math.max(toTime(firstDate), toTime(lastDate) - (days - 1) * DAY) : toTime(firstDate);
+	const labels = [];
+	for (let t = start; t <= toTime(lastDate); t += DAY) labels.push(toDate(t));
+	const dense = labels.length <= 60;
+	const datasets = slugs.map((slug, i) => ({
+		label: slug,
+		data: labels.map(d => series[slug][d] ?? null),
+		borderColor: COLOURS[i % COLOURS.length],
+		backgroundColor: COLOURS[i % COLOURS.length],
+		borderDash: i >= COLOURS.length ? [6, 4] : [],
+		borderWidth: 2,
+		pointRadius: labels.length === 1 ? 5 : dense ? 3 : 0,
+		pointHoverRadius: 5,
+		pointBorderColor: "#171717",
+		pointBorderWidth: 2,
+		spanGaps: false,
+		tension: 0
+	}));
+	if (chart) chart.destroy();
+	chart = new Chart(document.getElementById("chart"), {
+		type: "line",
+		data: { labels, datasets },
+		options: {
+			maintainAspectRatio: false,
+			animation: false,
+			interaction: { mode: "index", intersect: false },
+			plugins: {
+				legend: { display: slugs.length > 1, labels: { color: "#ffffff", boxHeight: 2 } },
+				tooltip: {
+					callbacks: {
+						label: c => ` ${c.dataset.label}: ${c.raw === null ? "no data" : fmt(c.raw)}`
+					}
+				}
+			},
+			scales: {
+				x: { offset: labels.length === 1, ticks: { color: "#a8a8a8", maxRotation: 0, autoSkip: true, autoSkipPadding: 24, maxTicksLimit: 6 }, grid: { display: false } },
+				y: {
+					ticks: { color: "#a8a8a8", precision: 0, callback: v => fmt(v) },
+					grid: { color: "#2e2e2e" },
+					border: { display: false }
+				}
+			}
+		}
+	});
+}
+
+async function load() {
+	const note = document.getElementById("note");
+	try {
+		const [csvText, latest] = await Promise.all([
+			fetch("data/installs.csv", { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error("data/installs.csv: " + r.status); return r.text(); }),
+			fetch("data/latest.json", { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error("data/latest.json: " + r.status); return r.json(); })
+		]);
+		const series = parseSeries(csvText);
+		const slugs = Object.keys(series);
+		const dates = [...new Set(slugs.flatMap(s => Object.keys(series[s])))].sort();
+		if (!dates.length) {
+			note.textContent = "No data yet.";
+			return;
+		}
+		const firstDate = dates[0], lastDate = dates[dates.length - 1];
+		note.textContent = `Latest data: ${latest.date} (UTC), RuneLite ${latest.version}, `
+			+ `${fmt(Object.keys(latest.counts).length)} plugins on the Hub. `
+			+ `History from ${firstDate}.`;
+
+		renderCards(series, slugs, lastDate, latest);
+		const buttons = document.querySelectorAll("#ranges button");
+		const show = days => {
+			buttons.forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.days === days)));
+			renderChart(series, slugs, firstDate, lastDate, days);
+		};
+		buttons.forEach(b => b.addEventListener("click", () => show(+b.dataset.days)));
+		show(0);
+	} catch (e) {
+		note.textContent = "Could not load the data (" + e.message + "). The page must be served over http, not opened as a file.";
+	}
+}
+
+load();
+</script>
+</body>
+</html>

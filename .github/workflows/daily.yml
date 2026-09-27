@@ -1,0 +1,35 @@
+name: daily installs
+
+on:
+  schedule:
+    - cron: "15 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-installs
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch install counts
+        run: python3 fetch_installs.py
+
+      - name: Commit if the data changed
+        run: |
+          git add data
+          if git diff --cached --quiet; then
+            echo "No change in data/."
+            exit 0
+          fi
+          date=$(python3 -c "import json; print(json.load(open('data/latest.json'))['date'])")
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "installs $date"
+          git push
