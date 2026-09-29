@@ -1,21 +1,24 @@
-name: daily installs
+name: hub health
 
 on:
   schedule:
-    - cron: "15 3 * * *"
+    - cron: "37 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
   issues: write
 
+# the same group as daily.yml, so the two never push at once
 concurrency:
   group: daily-installs
   cancel-in-progress: false
 
 jobs:
-  fetch:
+  check:
     runs-on: ubuntu-latest
+    # a hung run would hold the group daily.yml shares for GitHub's default six hours
+    timeout-minutes: 10
     steps:
       # the branch tip when the run starts, not the sha it was queued with: a run that waited
       # behind the other workflow would otherwise miss its push and fail to rebase
@@ -23,37 +26,30 @@ jobs:
         with:
           ref: ${{ github.ref }}
 
-      - name: Fetch install counts
-        run: python3 fetch_installs.py
-
-      # never stops the install counts being committed; when the issue step fails the old
-      # health files are put back, so the next hourly run sees the change and tries again
       - name: Check the Plugin Hub
-        continue-on-error: true
-        timeout-minutes: 10
+        id: health
+        run: python3 check_health.py --actions-out "$RUNNER_TEMP/health-actions.json"
+
+      # a failure here skips the commit, so the next run sees the same change and tries again
+      - name: Open or close alert issues
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: |
-          python3 check_health.py --actions-out "$RUNNER_TEMP/health-actions.json"
-          if ! python3 check_health.py --apply "$RUNNER_TEMP/health-actions.json"; then
-            for f in data/health.json data/health-log.csv; do
-              git checkout -- "$f" 2>/dev/null || rm -f "$f"
-            done
-            exit 1
-          fi
+        run: python3 check_health.py --apply "$RUNNER_TEMP/health-actions.json"
 
-      - name: Commit if the data changed
+      - name: Commit if the health changed
+        if: steps.health.outputs.changed == 'true'
+        env:
+          SUMMARY: ${{ steps.health.outputs.summary }}
         run: |
-          git add data
+          git add data/health.json data/health-log.csv
           if git diff --cached --quiet; then
-            echo "No change in data/."
+            echo "No change in the health files."
             exit 0
           fi
-          date=$(python3 -c "import json; print(json.load(open('data/latest.json'))['date'])")
           git -c user.name="github-actions[bot]" \
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit -m "installs $date"
+              commit -m "health: $SUMMARY"
           # someone may have pushed to main (a plugins.txt edit) while this ran
           git pull --rebase origin "$GITHUB_REF_NAME"
           git push origin "HEAD:$GITHUB_REF_NAME"

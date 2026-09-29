@@ -25,6 +25,53 @@ Add its slug - the last part of its `runelite.net/plugin-hub/show/<slug>` addres
 new line of `plugins.txt`. That is the only step. Its history starts on the next run;
 earlier days can still be looked up in `data/all/`.
 
+## Availability alerts
+
+Every hour (`.github/workflows/health.yml`, at 37 minutes past) `check_health.py` reads the
+Plugin Hub's own list of plugins for the current client version
+(`https://repo.runelite.net/plugins/manifest/<version>_full.js`) and checks that each
+plugin written by an author named in `owners.txt` still has a jar players can install.
+`plugins.txt` plays no part: it only picks the plugins charted on the page.
+
+A new plugin is picked up by itself, as long as two things name an owner in `owners.txt`:
+the `author=` line of its `runelite-plugin.properties` (exactly that name, or that name
+among comma-separated co-authors), and the `repository=` line of its entry in
+runelite/plugin-hub (`https://github.com/<owner>/...`). The author line is free text
+anyone can write, so it is not enough on its own; the check looks the entry up once, when
+the plugin first appears. If a plugin you expect is not watched, the run's log in the
+Actions tab carries a warning saying why, and so does an owner with no plugin at all.
+
+Each watched plugin has one of four statuses:
+
+- **ok** - on the Hub with a jar; players can install it.
+- **pending** - on the Hub with no jar and no reason given. The Hub may be part way through
+  a rebuild, so this waits: still without a jar at a check 45 minutes or more later, it
+  becomes unavailable - in practice at the next hourly check.
+- **unavailable** - on the Hub with no jar because its build failed or RuneLite gave a reason.
+  This is what the client shows as "Plugin is incompatible, requires update by its author".
+- **missing** - watched before and gone from the Hub's list. Like pending, it waits first.
+
+When a plugin becomes unavailable or missing, the check opens a GitHub issue in this
+repository, labelled `hub-health`, that says what happened and what to do and mentions the
+owner - so GitHub emails them. When the plugin is available again the issue is commented on
+and closed. One issue per plugin, however many runs see the problem. If the issue cannot be
+opened, nothing is committed and the next hourly check tries again.
+
+State lives in `data/health.json` (also shown as a line at the top of the page) and every
+change of status or client version is appended to `data/health-log.csv`:
+`time,plugin,from,to,detail`. The hourly job commits only when a status or a version
+changed; the daily install run checks as well and commits `data/health.json` every day, so
+the "checked" time on the page is up to a day old while all is well. A page whose last
+check is more than 36 hours old says the check may have stopped.
+
+To try it by hand: the Actions tab, "hub health", Run workflow. Locally, without touching
+GitHub issues (it does update `data/health.json` and `data/health-log.csv` in this folder,
+so do not commit those afterwards):
+
+    python check_health.py --actions-out actions.json
+
+`python check_health.py --apply actions.json` performs those actions with the `gh` CLI.
+
 ## Data layout
 
 - `data/installs.csv` - the tracked plugins only, one row per plugin per day:

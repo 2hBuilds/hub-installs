@@ -56,12 +56,24 @@
 	.rise { color: var(--rise); }
 	.fall { color: var(--fall); }
 	.blank { color: var(--muted); }
+	.health { margin-bottom: 16px; }
+	.health-line { display: flex; align-items: flex-start; gap: 8px; color: var(--muted); font-size: 13px; margin: 0 0 8px; overflow-wrap: anywhere; }
+	.health-line.pending { color: var(--accent); }
+	.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-top: 5px; background: var(--rise); }
+	.pending .dot { background: var(--accent); }
+	.none .dot { background: var(--muted); }
+	.health .card { border: 1px solid var(--fall); margin-bottom: 8px; }
+	.health .card h2 { color: var(--fall); }
+	.health-row { padding: 8px 0; overflow-wrap: anywhere; }
+	.health-row + .health-row { border-top: 1px solid var(--line); }
+	.health-row p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
 </style>
 </head>
 <body>
 <main>
 	<h1>Plugin Hub installs</h1>
 	<p class="note" id="note">Loading...</p>
+	<div class="health" id="health" hidden></div>
 
 	<section class="card">
 		<div class="ranges" id="ranges" role="group" aria-label="Time range">
@@ -231,7 +243,84 @@ async function load() {
 	}
 }
 
+const STATUS_WORDS = { pending: "waiting for a jar", unavailable: "unavailable", missing: "missing from the Plugin Hub" };
+// a healthy repository refreshes checkedAt at least daily (the daily install run checks too)
+const STALE_MS = 36 * 60 * 60 * 1000;
+const localTime = iso => {
+	if (typeof iso !== "string" || !iso) return "";
+	const d = new Date(iso);
+	return isNaN(d) ? "" : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+};
+
+function element(tag, cls, text) {
+	const e = document.createElement(tag);
+	if (cls) e.className = cls;
+	if (text !== undefined) e.textContent = text;
+	return e;
+}
+
+function dotLine(cls, text) {
+	const line = element("p", "health-line " + cls);
+	line.append(element("span", "dot"), element("span", "", text));
+	return line;
+}
+
+// data/health.json is written by check_health.py; without it the strip stays hidden.
+// A file that says nothing is watched, or whose check is old, says so rather than looking fine.
+async function loadHealth() {
+	const holder = document.getElementById("health");
+	try {
+		const r = await fetch("data/health.json", { cache: "no-cache" });
+		if (!r.ok) return;
+		const health = await r.json();
+		const plugins = (Array.isArray(health.plugins) ? health.plugins : []).filter(p => p && typeof p.slug === "string");
+		const checked = localTime(health.checkedAt);
+		const stale = !(Date.now() - Date.parse(health.checkedAt) <= STALE_MS);
+		const when = `RuneLite ${String(health.version)} - checked ${checked || "at an unknown time"}`;
+		const name = p => String(p.name || p.slug);
+		const down = plugins.filter(p => p.status !== "ok" && p.status !== "pending");
+		const pending = plugins.filter(p => p.status === "pending");
+		const parts = [];
+		if (down.length) {
+			const panel = element("section", "card");
+			panel.append(element("h2", "", "Unavailable on the Plugin Hub"));
+			for (const p of down) {
+				const row = element("div", "health-row");
+				const head = element("div");
+				head.append(element("strong", "", name(p)), document.createTextNode(" - "),
+					element("span", "fall", STATUS_WORDS[p.status] || String(p.status)));
+				row.append(head);
+				if (p.reason) row.append(element("p", "", String(p.reason)));
+				if (localTime(p.since)) row.append(element("p", "", "Since " + localTime(p.since)));
+				panel.append(row);
+			}
+			parts.push(panel);
+		}
+		for (const p of pending) {
+			parts.push(dotLine("pending", `${name(p)}: ${p.reason ? String(p.reason) : "no jar on the Plugin Hub yet"}`));
+		}
+		if (stale) {
+			parts.push(dotLine("pending", checked
+				? `Not checked since ${checked} - the availability check may have stopped`
+				: "No time of the last check - the availability check may have stopped"));
+		} else if (!plugins.length) {
+			parts.push(dotLine("none", `No plugins watched - ${when}`));
+		} else if (!parts.length) {
+			const n = plugins.length;
+			parts.push(dotLine("ok", `${n === 1 ? "1 plugin" : `All ${n} plugins`} available on the Plugin Hub - ${when}`));
+		} else {
+			parts.push(element("p", "health-line", when));
+		}
+		holder.replaceChildren(...parts);
+		holder.hidden = false;
+	} catch (e) {
+		holder.replaceChildren();
+		holder.hidden = true;
+	}
+}
+
 load();
+loadHealth();
 </script>
 </body>
 </html>

@@ -1,0 +1,5 @@
+# Plugin Hub authors whose plugins check_health.py watches, one per line: the author
+# name the Hub shows for the plugin (the author= line of its runelite-plugin.properties),
+# which is also the GitHub account an alert issue mentions. Case and spaces do not
+# matter. Anything after a # is ignored.
+2hBuilds
