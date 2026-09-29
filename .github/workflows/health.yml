@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "37 * * * *"
   workflow_dispatch:
+    inputs:
+      drill:
+        description: "Send a test alert: opens and closes one test issue"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -53,3 +58,12 @@ jobs:
           # someone may have pushed to main (a plugins.txt edit) while this ran
           git pull --rebase origin "$GITHUB_REF_NAME"
           git push origin "HEAD:$GITHUB_REF_NAME"
+
+      # by hand only, with the box ticked: a scheduled run has no inputs, so inputs.drill is not true there;
+      # success() keeps it from running after a failed step, and a skipped commit step is not a failure
+      - name: Fire drill
+        if: success() && github.event_name == 'workflow_dispatch' && inputs.drill == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 check_health.py --drill

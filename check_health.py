@@ -2,6 +2,7 @@
 
 Run: python check_health.py --actions-out actions.json
      python check_health.py --apply actions.json      (opens / closes GitHub issues with gh)
+     python check_health.py --drill                   (opens, comments on and closes one test issue)
 
 The watched plugins are every Hub plugin whose author is named in owners.txt, plus any
 plugin a previous run watched that has since left the manifest. The author field is free
@@ -42,6 +43,12 @@ LOG_HEADER = ["time", "plugin", "from", "to", "detail"]
 # the Hub may be part way through a rebuild, and the daily run or a manual one can come minutes later
 PENDING_GRACE = datetime.timedelta(minutes=45)
 ALARMED = ("unavailable", "missing")
+# every real alert's title is "[<slug>] <name>" + ALERT_TAIL (open_action) and a drill's is exactly
+# DRILL_TITLE, which does not end that way, so the two cannot be taken for each other even when a
+# plugin's slug is "drill" (is_drill)
+ALERT_TAIL = " is unavailable on the Plugin Hub"
+DRILL_TITLE = "[drill] Test alert - nothing is wrong"
+DRILL_COMMENT = "Drill complete: the alert path works. Closing."
 
 
 class ManifestMissing(FetchError):
@@ -363,7 +370,7 @@ def open_action(record, entry, version, owners):
     lines.append(" ".join("@" + owner_name(o) for o in mentions if GITHUB_LOGIN.fullmatch(owner_name(o))))
     return {
         "action": "open", "slug": slug,
-        "title": "[%s] %s is unavailable on the Plugin Hub" % (slug, harmless_title(record["name"])),
+        "title": "[%s] %s%s" % (slug, harmless_title(record["name"]), ALERT_TAIL),
         "body": "\n".join(lines) + "\n",
     }
 
@@ -396,6 +403,34 @@ def _with_file(text, use):
         os.remove(path)
 
 
+def is_drill(title):
+    """True for a drill's issue title, which is always exactly DRILL_TITLE. Anything else that starts
+    "[drill]" - the alert of a plugin whose slug is "drill", even one retitled by hand, or an issue
+    someone opened themselves - is not a drill, so a drill never closes it."""
+    return title == DRILL_TITLE
+
+
+def _label(run):
+    run(["gh", "label", "create", LABEL, "--force", "--color", "d73a4a",
+         "--description", "Plugin Hub availability alerts from check_health.py"])
+
+
+def _open_issues(run):
+    listed = json.loads(run(["gh", "issue", "list", "--label", LABEL, "--state", "open",
+                             "--json", "number,title", "--limit", "200"]) or "[]")
+    return [i for i in listed if isinstance(i, dict) and isinstance(i.get("title"), str)]
+
+
+def _create(run, title, body):
+    return _with_file(body, lambda path: run(
+        ["gh", "issue", "create", "--title", title, "--body-file", path, "--label", LABEL]))
+
+
+def _comment_and_close(run, number, comment):
+    _with_file(comment, lambda path: run(["gh", "issue", "comment", number, "--body-file", path]))
+    run(["gh", "issue", "close", number])
+
+
 def apply_actions(actions, run=gh):
     """Open or close hub-health issues with gh; running the same actions twice changes nothing more.
 
@@ -404,33 +439,84 @@ def apply_actions(actions, run=gh):
     if not actions:
         print("no issue to open or close")
         return
-    run(["gh", "label", "create", LABEL, "--force", "--color", "d73a4a",
-         "--description", "Plugin Hub availability alerts from check_health.py"])
-    listed = json.loads(run(["gh", "issue", "list", "--label", LABEL, "--state", "open",
-                             "--json", "number,title", "--limit", "200"]) or "[]")
-    issues = [i for i in listed if isinstance(i, dict) and isinstance(i.get("title"), str)]
+    _label(run)
+    issues = _open_issues(run)
     for action in actions:
         slug = action.get("slug") if isinstance(action, dict) else None
         if not isinstance(slug, str) or not SLUG.fullmatch(slug):
             print("note: skipping an action with an invalid slug")
             continue
-        mine = [i for i in issues if i["title"].startswith("[%s]" % slug)]
+        mine = [i for i in issues if i["title"].startswith("[%s]" % slug) and not is_drill(i["title"])]
         if action.get("action") == "open":
             if mine:
                 print("%s: issue #%s is already open" % (slug, mine[0].get("number")))
                 continue
-            url = _with_file(action["body"], lambda path: run(
-                ["gh", "issue", "create", "--title", action["title"], "--body-file", path, "--label", LABEL]))
+            url = _create(run, action["title"], action["body"])
             issues.append({"number": None, "title": action["title"]})
             print("%s: opened %s" % (slug, (url or "").strip()))
         elif action.get("action") == "close":
             for issue in mine:
                 number = str(issue["number"])
-                _with_file(action["comment"], lambda path: run(["gh", "issue", "comment", number, "--body-file", path]))
-                run(["gh", "issue", "close", number])
+                _comment_and_close(run, number, action["comment"])
                 print("%s: closed #%s" % (slug, number))
             if not mine:
                 print("%s: no open issue to close" % slug)
+
+
+# --- the fire drill -----------------------------------------------------------------------
+
+def drill_body(owners, now):
+    """The drill issue's text: says it is a test, when, what a real alert looks like, and mentions
+    every owners.txt name that looks like a GitHub login, as a real alert does, so GitHub emails them."""
+    lines = [
+        "This is a TEST of the availability alerts: no plugin is affected and nothing needs doing.",
+        "",
+        "- Drill time: %s" % now.strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "",
+        "A real alert has the title `[<slug>] <name>%s` and arrives the same way:"
+        " an issue labelled `%s` that mentions the owner." % (ALERT_TAIL, LABEL),
+        "This issue closes itself: the drill comments on it and closes it straight after opening it.",
+        "",
+        " ".join("@" + owner_name(o) for o in owners if GITHUB_LOGIN.fullmatch(owner_name(o))),
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def issue_number(url):
+    """The number at the end of the issue address gh issue create prints."""
+    match = re.search(r"/issues/(\d+)\s*$", url or "")
+    if not match:
+        raise FetchError("gh issue create printed no issue address: %r" % plain(url, 200))
+    return match.group(1)
+
+
+def drill(owners, now=None, run=gh):
+    """Exercise the alarm end to end: the label, one issue that mentions the owners, a comment, the close.
+
+    Touches nothing but GitHub issues: no data file, no watch state, no fetch. An open drill issue
+    left by an earlier drill that failed half way is commented on and closed instead of opening another.
+    """
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    if not any(GITHUB_LOGIN.fullmatch(owner_name(o)) for o in owners):
+        print("::warning::no name in owners.txt looks like a GitHub login; the drill mentions nobody")
+    _label(run)
+    earlier = [i for i in _open_issues(run) if is_drill(i["title"])]
+    if earlier:
+        numbers = [str(i["number"]) for i in earlier]
+        if not all(n.isdigit() for n in numbers):
+            raise FetchError("gh issue list gave an issue number that is not a number")
+        print("drill: #%s from an earlier drill is still open; closing it instead of opening another"
+              % ", #".join(numbers))
+    else:
+        url = _create(run, DRILL_TITLE, drill_body(owners, now))
+        numbers = [issue_number(url)]
+        print("drill: opened %s" % url.strip())
+    for number in numbers:
+        _comment_and_close(run, number, DRILL_COMMENT)
+        print("drill: commented on and closed #%s" % number)
+    if earlier:
+        print("::warning::this drill only tidied up an earlier one: it opened no issue and mentioned nobody,"
+              " so no alert e-mail comes from it; run the drill once more to see the whole path")
 
 
 # --- the run --------------------------------------------------------------------------------
@@ -534,7 +620,19 @@ def main(argv=None, root=ROOT, env=None, fetch=None, fetch_manifest=None, now=No
     parser = argparse.ArgumentParser(description="Check our Plugin Hub plugins are available.")
     parser.add_argument("--actions-out", help="write the issue actions of this run to this JSON file")
     parser.add_argument("--apply", metavar="ACTIONS", help="perform the actions in this JSON file with gh, then stop")
+    parser.add_argument("--drill", action="store_true",
+                        help="send a test alert with gh: open, comment on and close one test issue, then stop")
     args = parser.parse_args(argv)
+    if args.drill:
+        if args.apply or args.actions_out:
+            parser.error("--drill runs on its own")
+        # a drill is not a status: no data file, no fetch, no changed= line
+        try:
+            drill(read_tracked(os.path.join(root, "owners.txt")), now, runner)
+        except (FetchError, OSError, ValueError, KeyError) as e:
+            print("error: %s" % e, file=sys.stderr)
+            return 1
+        return 0
     if args.apply:
         try:
             with open(args.apply, encoding="utf-8") as f:

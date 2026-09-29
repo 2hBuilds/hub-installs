@@ -72,6 +72,14 @@ so do not commit those afterwards):
 
 `python check_health.py --apply actions.json` performs those actions with the `gh` CLI.
 
+To see the alarm itself work, run a fire drill: the Actions tab, "hub health", Run workflow,
+tick "Send a test alert", Run. After the usual check it opens one `hub-health` issue titled
+"[drill] Test alert - nothing is wrong" that mentions the owners, comments on it and closes it,
+so GitHub sends its e-mail about the mention. It touches no data file. The issue stays readable
+by anyone, like every issue of a public repository; it shows the GitHub name, never an e-mail address.
+If the run shows as cancelled (a scheduled run queued behind it takes its place), or warns that it
+only tidied up an earlier drill left open, no e-mail came from it: run the drill once more.
+
 ## Data layout
 
 - `data/installs.csv` - the tracked plugins only, one row per plugin per day:

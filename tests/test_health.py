@@ -763,6 +763,273 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(lines, ["SUMMARY: ${{ steps.health.outputs.summary }}"])
 
 
+EMAIL = re.compile(r"[^\s@<>()\[\]]+@[^\s@<>()\[\]]+\.[A-Za-z]{2,}")
+
+
+def snapshot(root):
+    """{relative path: bytes} of every file under root."""
+    files = {}
+    for folder, _, names in os.walk(root):
+        for name in names:
+            path = os.path.join(folder, name)
+            with open(path, "rb") as f:
+                files[os.path.relpath(path, root)] = f.read()
+    return files
+
+
+class DrillGh(FakeGh):
+    """FakeGh that also keeps the body files it was handed, to see they were files and are gone."""
+
+    def __init__(self, issues=None, fail_on=None):
+        super().__init__(issues)
+        self.files = []
+        self.fail_on = fail_on
+
+    def __call__(self, args):
+        if "--body-file" in args:
+            self.files.append(args[args.index("--body-file") + 1])
+        if self.fail_on and args[1:3] == self.fail_on:
+            self.calls.append(args)
+            raise fetch_installs.FetchError("gh %s failed: HTTP 403" % " ".join(self.fail_on))
+        return super().__call__(args)
+
+
+class DrillTest(unittest.TestCase):
+    def setUp(self):
+        self.root = make_root()
+        os.makedirs(os.path.join(self.root, "data"))
+        with open(os.path.join(self.root, "data", "health.json"), "w", encoding="utf-8") as f:
+            f.write('{"checkedAt": "2026-09-29T00:37:00Z", "plugins": []}\n')
+        with open(os.path.join(self.root, "data", "health-log.csv"), "w", encoding="utf-8") as f:
+            f.write("time,plugin,from,to,detail\n")
+        self.fetched = []
+
+    def no_fetch(self, url):
+        self.fetched.append(url)
+        raise AssertionError("a drill fetched %s" % url)
+
+    def drill(self, gh, env=None):
+        """main(["--drill"]) as the workflow runs it; returns (exit code, stdout, stderr)."""
+        env = {"GITHUB_OUTPUT": os.path.join(self.root, "gh-output.txt")} if env is None else env
+        with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+            code = check_health.main(["--drill"], self.root, env, self.no_fetch, self.no_fetch, T0, gh,
+                                     fetch_file=self.no_fetch)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_one_drill_labels_lists_opens_comments_and_closes(self):
+        gh = DrillGh()
+        code, printed, _ = self.drill(gh)
+        self.assertEqual(code, 0)
+        self.assertEqual([c[1:3] for c in gh.calls], [["label", "create"], ["issue", "list"], ["issue", "create"],
+                                                     ["issue", "comment"], ["issue", "close"]])
+        self.assertEqual(gh.calls[0][:5], ["gh", "label", "create", "hub-health", "--force"])
+        create = gh.calls[2]
+        self.assertEqual(create[create.index("--title") + 1], "[drill] Test alert - nothing is wrong")
+        self.assertEqual(create[create.index("--label") + 1], "hub-health")
+        self.assertEqual(gh.calls[3][3], "1")
+        self.assertEqual(gh.calls[4], ["gh", "issue", "close", "1"])
+        self.assertEqual(gh.issues, [{"number": 1, "title": "[drill] Test alert - nothing is wrong", "open": False}])
+        self.assertEqual(gh.bodies[1], "Drill complete: the alert path works. Closing.")
+        self.assertIn("drill: opened https://github.com/2hBuilds/hub-installs/issues/1", printed)
+        self.assertIn("drill: commented on and closed #1", printed)
+
+    def test_the_body_says_test_and_mentions_the_owners(self):
+        with open(os.path.join(self.root, "owners.txt"), "w", encoding="utf-8") as f:
+            f.write("# owners\n2hBuilds\n2h Builds\n@friend\n")
+        gh = DrillGh()
+        self.drill(gh)
+        body = gh.bodies[0]
+        lines = body.rstrip("\n").splitlines()
+        self.assertIn("TEST", lines[0])
+        self.assertIn("no plugin is affected", lines[0])
+        self.assertIn("2026-09-28 13:37:00 UTC", body)
+        self.assertIn("`[<slug>] <name> is unavailable on the Plugin Hub`", body)
+        self.assertIn("closes itself", body)
+        # the name with a space is not a login, exactly as a real alert leaves it out
+        self.assertEqual(lines[-1], "@2hBuilds @friend")
+        self.assertEqual(body.count("@"), 2)
+
+    def test_nothing_shaped_like_an_email_address_is_written_or_printed(self):
+        gh = DrillGh()
+        _, printed, err = self.drill(gh)
+        self.assertTrue(EMAIL.search("mention a.b+c@example.co here"))  # the pattern itself works
+        for text in gh.bodies + [printed, err] + [a for c in gh.calls for a in c]:
+            self.assertIsNone(EMAIL.search(text), text)
+
+    def test_the_body_goes_through_a_file_and_never_a_shell(self):
+        gh = DrillGh()
+        self.drill(gh)
+        for call in gh.calls:
+            FakeGh.assertList(call)
+            self.assertNotIn("--body", call)
+            self.assertFalse(any("TEST" in a or "\n" in a for a in call), call)
+        self.assertEqual(len(gh.files), 2)
+        self.assertFalse(any(os.path.exists(path) for path in gh.files))
+
+    def test_a_half_finished_earlier_drill_is_closed_not_duplicated(self):
+        gh = DrillGh([{"number": 5, "title": "[drill] Test alert - nothing is wrong", "open": True}])
+        code, printed, _ = self.drill(gh)
+        self.assertEqual(code, 0)
+        self.assertEqual([c[1:3] for c in gh.calls], [["label", "create"], ["issue", "list"],
+                                                     ["issue", "comment"], ["issue", "close"]])
+        self.assertEqual(len(gh.issues), 1)
+        self.assertFalse(gh.issues[0]["open"])
+        self.assertIn("#5 from an earlier drill is still open", printed)
+        # that run mentioned nobody, so it says so and asks for another drill
+        self.assertIn("::warning::this drill only tidied up an earlier one", printed)
+        self.assertIn("no alert e-mail comes from it; run the drill once more", printed)
+
+    def test_a_fresh_drill_does_not_ask_to_be_run_again(self):
+        _, printed, _ = self.drill(DrillGh())
+        self.assertNotIn("::warning::", printed)
+        self.assertNotIn("run the drill once more", printed)
+
+    def test_owners_with_no_github_login_give_a_warning_and_a_body_with_no_mention(self):
+        with open(os.path.join(self.root, "owners.txt"), "w", encoding="utf-8") as f:
+            f.write("# owners\n2h Builds\nme@example.com\n")
+        gh = DrillGh()
+        code, printed, err = self.drill(gh)
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
+        self.assertIn("::warning::no name in owners.txt looks like a GitHub login; the drill mentions nobody",
+                      printed)
+        # the drill still runs the whole path; only the mention is missing
+        self.assertEqual([c[1:3] for c in gh.calls], [["label", "create"], ["issue", "list"], ["issue", "create"],
+                                                     ["issue", "comment"], ["issue", "close"]])
+        body = gh.bodies[0]
+        self.assertNotIn("@", body)
+        self.assertIsNone(EMAIL.search(body), body)
+        self.assertNotIn("example.com", body + printed)
+        self.assertTrue(body.endswith("\n\n\n"), repr(body[-40:]))
+
+    def test_a_close_that_fails_is_finished_by_the_next_drill(self):
+        gh = DrillGh(fail_on=["issue", "close"])
+        self.assertEqual(self.drill(gh)[0], 1)
+        self.assertTrue(gh.issues[0]["open"])
+        gh.fail_on = None
+        self.assertEqual(self.drill(gh)[0], 0)
+        self.assertEqual([(i["number"], i["open"]) for i in gh.issues], [(1, False)])
+
+    def test_a_gh_failure_exits_one_with_one_error_line(self):
+        for verb in (["label", "create"], ["issue", "list"], ["issue", "create"], ["issue", "comment"]):
+            code, _, err = self.drill(DrillGh(fail_on=verb))
+            self.assertEqual(code, 1, verb)
+            self.assertEqual(err.count("\n"), 1, err)
+            self.assertTrue(err.startswith("error: gh %s failed" % " ".join(verb)), err)
+
+    def test_an_issue_address_gh_did_not_print_is_a_failure(self):
+        code, _, err = self.drill(lambda args: "" if args[1:3] != ["issue", "list"] else "[]")
+        self.assertEqual(code, 1)
+        self.assertIn("printed no issue address", err)
+
+    def test_the_data_folder_is_untouched_and_nothing_is_fetched(self):
+        import urllib.request
+        before = snapshot(self.root)
+        original = urllib.request.urlopen
+
+        def urlopen(*args, **kwargs):
+            raise AssertionError("a drill opened a URL")
+
+        try:
+            urllib.request.urlopen = urlopen
+            code, printed, _ = self.drill(DrillGh())
+        finally:
+            urllib.request.urlopen = original
+        self.assertEqual(code, 0)
+        self.assertEqual(snapshot(self.root), before)
+        self.assertEqual(self.fetched, [])
+        self.assertFalse(os.path.exists(os.path.join(self.root, "gh-output.txt")))
+        self.assertNotIn("changed=", printed)
+        self.assertNotIn("summary=", printed)
+
+    def test_the_drill_runs_alone(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            check_health.main(["--drill", "--apply", "a.json"], self.root, {}, runner=DrillGh())
+
+
+class DrillSlugTest(unittest.TestCase):
+    """A plugin whose slug is "drill" is conceivable; its alert and a drill must never be taken for each other."""
+
+    PLUGIN_TITLE = "[drill] Drill Helper is unavailable on the Plugin Hub"
+
+    def test_the_titles_are_told_apart(self):
+        self.assertTrue(check_health.is_drill(check_health.DRILL_TITLE))
+        self.assertFalse(check_health.is_drill(self.PLUGIN_TITLE))
+        self.assertFalse(check_health.is_drill("[%s] X is unavailable on the Plugin Hub" % SLUG))
+        # the real alert for such a plugin, built the real way, is a plugin's issue
+        root = make_root()
+        _, actions, _, _ = check(root, Hub(body=manifest([entry("drill", displayName="Drill Helper",
+                                                               buildFailAt=FAILED_AT)], [])), T0)
+        self.assertEqual(actions[0]["title"], self.PLUGIN_TITLE)
+        self.assertFalse(check_health.is_drill(actions[0]["title"]))
+        # even a display name that reads like the drill's title
+        self.assertFalse(check_health.is_drill("[drill] Test alert - nothing is wrong is unavailable on the Plugin Hub"))
+
+    def test_a_drill_leaves_the_drill_plugins_issue_alone(self):
+        gh = DrillGh([{"number": 1, "title": self.PLUGIN_TITLE, "open": True}])
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(check_health.main(["--drill"], make_root(), {}, runner=gh, now=T0), 0)
+        self.assertEqual([(i["number"], i["open"]) for i in gh.issues], [(1, True), (2, False)])
+        self.assertNotIn(["gh", "issue", "close", "1"], gh.calls)
+
+    def test_only_the_exact_drill_title_is_a_drill(self):
+        # the drill plugin's alert retitled by hand, and an issue someone opened themselves
+        for title in ("[drill] Drill Helper is down", "[drill] other", "[drill] Test alert - nothing is wrong!"):
+            self.assertFalse(check_health.is_drill(title), title)
+            gh = DrillGh([{"number": 1, "title": title, "open": True}])
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(check_health.main(["--drill"], make_root(), {}, runner=gh, now=T0), 0)
+            self.assertEqual([(i["number"], i["open"]) for i in gh.issues], [(1, True), (2, False)], title)
+            # and the real alarm still counts it as the drill plugin's issue
+            gh = FakeGh([{"number": 1, "title": title, "open": True}])
+            with contextlib.redirect_stdout(io.StringIO()):
+                check_health.apply_actions([{"action": "open", "slug": "drill", "title": self.PLUGIN_TITLE,
+                                             "body": "b\n"}], gh)
+                check_health.apply_actions([{"action": "close", "slug": "drill", "comment": "back"}], gh)
+            self.assertEqual([(i["number"], i["open"]) for i in gh.issues], [(1, False)], title)
+
+    def test_an_open_drill_issue_does_not_count_as_the_drill_plugins_alert(self):
+        gh = FakeGh([{"number": 1, "title": check_health.DRILL_TITLE, "open": True}])
+        opened = {"action": "open", "slug": "drill", "title": self.PLUGIN_TITLE, "body": "b\n"}
+        with contextlib.redirect_stdout(io.StringIO()):
+            check_health.apply_actions([opened], gh)
+        self.assertEqual([i["title"] for i in gh.issues], [check_health.DRILL_TITLE, self.PLUGIN_TITLE])
+        with contextlib.redirect_stdout(io.StringIO()):
+            check_health.apply_actions([{"action": "close", "slug": "drill", "comment": "back"}], gh)
+        self.assertEqual([(i["number"], i["open"]) for i in gh.issues], [(1, True), (2, False)])
+
+
+class DrillWorkflowTest(unittest.TestCase):
+    def read(self, name):
+        return WorkflowTest.read(self, name)
+
+    def test_the_input(self):
+        self.assertIn("  workflow_dispatch:\n    inputs:\n      drill:\n"
+                      '        description: "Send a test alert: opens and closes one test issue"\n'
+                      "        type: boolean\n        default: false\n", self.read("health.yml"))
+
+    def test_the_fire_drill_step_is_last_and_runs_only_by_hand_with_the_box_ticked(self):
+        text = self.read("health.yml")
+        step = text[text.index("      - name: Fire drill"):]
+        self.assertGreater(text.index("      - name: Fire drill"), text.index("- name: Commit if the health changed"))
+        self.assertNotRegex(step[1:], r"\n      - ", "the drill is the last step")
+        self.assertEqual(step.splitlines()[1].strip(),
+                         "if: success() && github.event_name == 'workflow_dispatch' && inputs.drill == true")
+        self.assertIn("        env:\n          GH_TOKEN: ${{ github.token }}\n"
+                      "          GH_REPO: ${{ github.repository }}\n"
+                      "        run: python3 check_health.py --drill\n", step)
+        self.assertNotIn("continue-on-error", step)
+        # the input reaches only the if:, never a shell
+        self.assertEqual([line.strip() for line in text.splitlines()
+                          if "inputs." in line and not line.strip().startswith("#")],
+                         ["if: success() && github.event_name == 'workflow_dispatch' && inputs.drill == true"])
+        self.assertNotIn("${{ inputs", text)
+        self.assertNotIn("github.event.inputs", text)
+
+    def test_daily_has_no_drill(self):
+        self.assertNotIn("drill", self.read("daily.yml"))
+
+
 class IncidentTest(unittest.TestCase):
     """The 2026-09-28 incident: the Hub moves to 1.13.0, the build fails, the jar comes back."""
 
