@@ -748,7 +748,7 @@ class WorkflowTest(unittest.TestCase):
         # without ref, a run queued behind the other checks out the sha of its creation and its push conflicts
         for name in ("daily.yml", "health.yml"):
             text = self.read(name)
-            self.assertIn("uses: actions/checkout@v4\n        with:\n          ref: ${{ github.ref }}", text, name)
+            self.assertIn("uses: actions/checkout@v7\n        with:\n          ref: ${{ github.ref }}", text, name)
             self.assertIn("group: daily-installs", text, name)
 
     def test_nothing_can_hold_the_shared_group_for_hours(self):

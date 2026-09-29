@@ -19,7 +19,7 @@ jobs:
     steps:
       # the branch tip when the run starts, not the sha it was queued with: a run that waited
       # behind the other workflow would otherwise miss its push and fail to rebase
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.ref }}
 
