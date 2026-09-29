@@ -6,6 +6,16 @@ and a page that charts it.
 The page: https://2hbuilds.github.io/hub-installs/ (once GitHub Pages is switched on
 for this repository, serving from the root of `main`).
 
+The chart and each card's "Change" rows are the daily recording described below. The
+cards' Installs number and Hub rank are read live from RuneLite by the visitor's browser,
+after the page has drawn: two requests, to `static.runelite.net` and `api.runelite.net`,
+at most every 30 minutes while the page is open and none while its tab is hidden. A live
+number carries the time the browser read it; RuneLite's feed is cached for up to 30
+minutes, so the count itself can be that much older. A "Since the daily reading" row
+appears when the live number differs from the day's recording. If RuneLite cannot be
+reached, the cards show the recorded numbers; if it stops answering after a good read,
+that read stays, marked "last live" with its time, for up to 2 hours.
+
 ## Where the numbers come from
 
 The same two URLs runelite.net reads to show install counts:

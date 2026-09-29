@@ -56,6 +56,7 @@
 	.rise { color: var(--rise); }
 	.fall { color: var(--fall); }
 	.blank { color: var(--muted); }
+	.live { color: var(--muted); font-size: 13px; margin-left: 6px; }
 	.health { margin-bottom: 16px; }
 	.health-line { display: flex; align-items: flex-start; gap: 8px; color: var(--muted); font-size: 13px; margin: 0 0 8px; overflow-wrap: anywhere; }
 	.health-line.pending { color: var(--accent); }
@@ -134,25 +135,41 @@ function swatch(i) {
 	return i < COLOURS.length ? c : `repeating-linear-gradient(90deg, ${c} 0 4px, transparent 4px 6px)`;
 }
 
-function renderCards(series, slugs, lastDate, latest) {
-	const all = Object.values(latest.counts);
+// The quiet marker after a live figure; "last live" once a later read has failed. The time
+// is when this browser read the feed, which may have come from a cache up to 30 minutes old.
+function liveMarker(current, withTime) {
+	if (!current) return "";
+	const text = liveFailed ? "last live" : "live";
+	const title = `Read from RuneLite ${current.version} at ${timeOf(current.at)}; `
+		+ "RuneLite's feed can be up to 30 minutes older than that";
+	return `<span class="live" title="${esc(title)}">${esc(withTime ? `${text}${liveFailed ? " " : ", "}${timeOf(current.at)}` : text)}</span>`;
+}
+
+// `current` is the live read in use ({counts: Map, at, version}) or null for the recorded
+// numbers. Installs and Hub rank follow it; the change rows are always the recorded daily series.
+function renderCards(series, slugs, lastDate, latest, current) {
+	const all = current ? [...current.counts.values()] : Object.values(latest.counts);
+	const marker = liveMarker(current, true);
 	const holder = document.getElementById("plugins");
 	holder.innerHTML = "";
 	slugs.forEach((slug, i) => {
 		const byDate = series[slug];
 		const now = byDate[lastDate];
-		const count = latest.counts[slug];
+		const count = current ? current.counts.get(slug) : latest.counts[slug];
+		const shown = current ? count : now;
 		const rank = count === undefined ? null : 1 + all.filter(n => n > count).length;
+		const since = current && Number.isInteger(count) && Number.isInteger(now) && count !== now ? count - now : null;
 		const card = document.createElement("section");
 		card.className = "card";
 		card.innerHTML = `
 			<h2><span class="swatch" style="background:${swatch(i)}"></span><span></span></h2>
 			<table>
-				<tr><th>Installs</th><td>${now === null || now === undefined ? '<span class="blank">not in the feed</span>' : fmt(now)}</td></tr>
+				<tr><th>Installs</th><td>${shown === null || shown === undefined ? '<span class="blank">not in the feed</span>' : fmt(shown)}${marker}</td></tr>
+				${since === null ? "" : `<tr><th>Since the daily reading</th>${changeCell(since)}</tr>`}
 				<tr><th>Change, 1 day</th>${changeCell(change(byDate, lastDate, 1))}</tr>
 				<tr><th>Change, 7 days</th>${changeCell(change(byDate, lastDate, 7))}</tr>
 				<tr><th>Change, 30 days</th>${changeCell(change(byDate, lastDate, 30))}</tr>
-				<tr><th>Hub rank</th><td>${rank === null ? '<span class="blank">-</span>' : `${fmt(rank)} of ${fmt(all.length)}`}</td></tr>
+				<tr><th>Hub rank</th><td>${rank === null ? '<span class="blank">-</span>' : `${fmt(rank)} of ${fmt(all.length)}${liveMarker(current, false)}`}</td></tr>
 			</table>`;
 		card.querySelector("h2 span:last-child").textContent = slug;
 		holder.appendChild(card);
@@ -225,11 +242,13 @@ async function load() {
 		// Every run writes a row for each slug in plugins.txt, so the slugs with a row on
 		// the last day are the ones tracked now; a removed plugin drops off the page.
 		const slugs = Object.keys(series).filter(s => lastDate in series[s]);
-		note.textContent = `Latest data: ${latest.date} (UTC), RuneLite ${latest.version}, `
-			+ `${fmt(Object.keys(latest.counts).length)} plugins on the Hub. `
-			+ `History from ${firstDate}.`;
-
-		renderCards(series, slugs, lastDate, latest);
+		recorded = {
+			series, slugs, lastDate, latest,
+			note: `Latest data: ${latest.date} (UTC), RuneLite ${latest.version}, `
+				+ `${fmt(Object.keys(latest.counts).length)} plugins on the Hub. `
+				+ `History from ${firstDate}.`
+		};
+		draw();
 		const buttons = document.querySelectorAll("#ranges button");
 		const show = days => {
 			buttons.forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.days === days)));
@@ -238,10 +257,130 @@ async function load() {
 		buttons.forEach(b => b.addEventListener("click", () => show(+b.dataset.days)));
 		// "all" while the history is short, the last year once it is longer than that
 		show(toTime(lastDate) - toTime(firstDate) < 365 * DAY ? 0 : 365);
+		// only once the recorded page is drawn, and not awaited: a RuneLite that never
+		// answers leaves the page exactly as it is
+		readLive();
 	} catch (e) {
 		note.textContent = "Could not load the data (" + e.message + "). The page must be served over http, not opened as a file.";
 	}
 }
+
+// Live numbers: after the recorded page is drawn, this browser reads the same two URLs
+// fetch_installs.py reads, and the cards' Installs and Hub rank show what they say now.
+// The chart and the change rows stay the daily recording: those readings are taken at
+// the same hour each day, and the counts wobble through the day.
+const BOOTSTRAP_URL = "https://static.runelite.net/bootstrap.json";
+const LIVE_EVERY_MS = 30 * 60 * 1000;    // the feed's own max-age; never read more often
+const LIVE_KEEP_MS = 2 * 60 * 60 * 1000; // no good read for this long: back to the recorded numbers
+const LIVE_TIMEOUT_MS = 30 * 1000;
+const VERSION = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,39}$/;
+
+let recorded = null;     // {series, slugs, lastDate, latest, note} from data/
+let live = null;         // the last good live read: {counts: Map, at, version, fromBootstrap}
+let liveFailed = false;  // the read after it failed
+let lastTry = 0, reading = false, readTimer = 0, expireTimer = 0;
+
+const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+const timeOf = t => new Date(t).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+const liveNow = () => live && Date.now() - live.at < LIVE_KEEP_MS ? live : null;
+
+function draw() {
+	const { series, slugs, lastDate, latest, note } = recorded;
+	const current = liveNow();
+	// the version is named so a read that fell back to the recorded one is not mistaken for current
+	const from = !current ? "" : `RuneLite ${current.version}${current.fromBootstrap ? "" : " (the recorded version)"}`;
+	document.getElementById("note").textContent = note + (!current ? ""
+		: liveFailed ? ` Installs and rank on the cards are live from ${from} as of ${timeOf(current.at)}; RuneLite has not answered since.`
+		: ` Installs and rank on the cards are live from ${from}, read ${timeOf(current.at)}.`);
+	renderCards(series, slugs, lastDate, latest, current);
+}
+
+// A plain GET with no custom header, so no CORS preflight, and through the browser's
+// HTTP cache, so RuneLite's max-age is honoured. The signal only ends a hung request.
+async function getJson(url) {
+	const stop = new AbortController();
+	const timer = setTimeout(() => stop.abort(), LIVE_TIMEOUT_MS);
+	try {
+		const r = await fetch(url, { signal: stop.signal });
+		if (!r.ok) throw new Error(url + ": " + r.status);
+		return await r.json();
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+// fetch_installs.client_version: the first artifact whose name starts with "client",
+// its "version" field when present, else the version in a name like client-1.13.0.jar
+function clientVersion(bootstrap) {
+	const artifacts = bootstrap && typeof bootstrap === "object" ? bootstrap.artifacts : null;
+	if (!Array.isArray(artifacts)) return null;
+	for (const a of artifacts) {
+		const name = a && typeof a === "object" ? a.name : null;
+		if (typeof name !== "string" || !name.startsWith("client")) continue;
+		if (a.version) return String(a.version);
+		const match = /^client-(.+)\.jar$/.exec(name);
+		return match ? match[1] : null;
+	}
+	return null;
+}
+
+// only a version that is safe inside a URL path is ever used
+const safeVersion = v => typeof v === "string" && VERSION.test(v) ? v : null;
+
+// fetch_installs.parse_counts: a non-empty object whose every value is a non-negative
+// integer; one bad value rejects the whole feed
+function parseCounts(feed) {
+	if (!feed || typeof feed !== "object" || Array.isArray(feed)) return null;
+	const counts = new Map(Object.entries(feed));
+	if (!counts.size) return null;
+	for (const n of counts.values()) if (!Number.isInteger(n) || n < 0) return null;
+	return counts;
+}
+
+async function readLive() {
+	if (reading) return;
+	reading = true;
+	lastTry = Date.now();
+	try {
+		let version = null;
+		try {
+			version = safeVersion(clientVersion(await getJson(BOOTSTRAP_URL)));
+		} catch (e) {
+			// fall back to the version of the daily recording
+		}
+		const fromBootstrap = !!version;
+		version = version || safeVersion(recorded.latest.version);
+		if (!version) throw new Error("no client version");
+		const counts = parseCounts(await getJson(`https://api.runelite.net/runelite-${encodeURIComponent(version)}/pluginhub`));
+		if (!counts) throw new Error("the pluginhub feed has a bad count");
+		live = { counts, at: Date.now(), version, fromBootstrap };
+		liveFailed = false;
+	} catch (e) {
+		// the last good read stays, marked with its time, until LIVE_KEEP_MS
+		liveFailed = true;
+	} finally {
+		reading = false;
+	}
+	draw();
+	schedule();
+}
+
+// The next read LIVE_EVERY_MS after the last one, and none while the tab is hidden;
+// and a redraw when the last good read grows too old, so it drops back to the recording.
+function schedule() {
+	clearTimeout(readTimer);
+	clearTimeout(expireTimer);
+	if (live) expireTimer = setTimeout(draw, Math.max(0, live.at + LIVE_KEEP_MS - Date.now()) + 1000);
+	if (reading || document.visibilityState === "hidden") return;
+	readTimer = setTimeout(readLive, Math.max(0, lastTry + LIVE_EVERY_MS - Date.now()));
+}
+
+// back in view: redraw (an old live read may have expired) and read at once if one is due
+document.addEventListener("visibilitychange", () => {
+	if (!recorded || !lastTry) return;
+	if (document.visibilityState === "visible") draw();
+	schedule();
+});
 
 const STATUS_WORDS = { pending: "waiting for a jar", unavailable: "unavailable", missing: "missing from the Plugin Hub" };
 // a healthy repository refreshes checkedAt at least daily (the daily install run checks too)
