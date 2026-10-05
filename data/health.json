@@ -1,5 +1,5 @@
 {
- "checkedAt": "2026-10-04T05:17:09Z",
+ "checkedAt": "2026-10-05T00:53:38Z",
  "version": "1.13.1",
  "versionSince": "2026-09-30T10:47:09Z",
  "plugins": [
@@ -7,7 +7,7 @@
    "slug": "bank-portfolio-tracker",
    "name": "2h Bank Portfolio Tracker",
    "author": "2hBuilds",
-   "version": "1.0.10",
+   "version": "1.1.0",
    "status": "ok",
    "reason": null,
    "since": "2026-09-29T04:30:57Z",
