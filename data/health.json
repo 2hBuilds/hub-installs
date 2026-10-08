@@ -1,5 +1,5 @@
 {
- "checkedAt": "2026-10-08T03:29:21Z",
+ "checkedAt": "2026-10-08T12:54:42Z",
  "version": "1.13.1",
  "versionSince": "2026-09-30T10:47:09Z",
  "plugins": [
@@ -11,6 +11,26 @@
    "status": "ok",
    "reason": null,
    "since": "2026-09-29T04:30:57Z",
+   "warning": null
+  },
+  {
+   "slug": "chat-hover-info",
+   "name": "2h Chat Hover Info",
+   "author": "2hBuilds",
+   "version": "0.0.1",
+   "status": "ok",
+   "reason": null,
+   "since": "2026-10-08T12:54:42Z",
+   "warning": null
+  },
+  {
+   "slug": "why-lag",
+   "name": "2h Why Lag",
+   "author": "2hBuilds",
+   "version": "1.0.0",
+   "status": "ok",
+   "reason": null,
+   "since": "2026-10-08T12:54:42Z",
    "warning": null
   }
  ]
