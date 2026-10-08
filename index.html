@@ -145,6 +145,36 @@ function liveMarker(current, withTime) {
 	return `<span class="live" title="${esc(title)}">${esc(withTime ? `${text}${liveFailed ? " " : ", "}${timeOf(current.at)}` : text)}</span>`;
 }
 
+const sum = list => list.reduce((a, n) => a + (n || 0), 0);
+
+// The Total card's change rows: the recorded sum on the last date minus the recorded sum on the
+// look-back date. A plugin with nothing yet on that date had not started and counts as 0; the row
+// is blank only when none of them had started.
+function totalChange(series, slugs, lastDate, days) {
+	const then = slugs.map(s => valueAtOrBefore(series[s], toDate(toTime(lastDate) - days * DAY)));
+	return then.every(n => n === null) ? null : sum(slugs.map(s => series[s][lastDate])) - sum(then);
+}
+
+// The card ahead of the plugins when two or more are shown: the live figures added up when every
+// plugin has one, else the recorded figures of the last date. No Hub rank, that is per plugin.
+function totalCard(series, slugs, lastDate, current) {
+	const now = sum(slugs.map(s => series[s][lastDate]));
+	const liveSum = current && slugs.every(s => current.counts.has(s)) ? sum(slugs.map(s => current.counts.get(s))) : null;
+	const since = liveSum !== null && liveSum !== now ? liveSum - now : null;
+	const card = document.createElement("section");
+	card.className = "card";
+	card.innerHTML = `
+		<h2><span class="swatch" style="background:var(--text)"></span><span>Total</span></h2>
+		<table>
+			<tr><th>Installs</th><td>${fmt(liveSum === null ? now : liveSum)}${liveSum === null ? "" : liveMarker(current, true)}</td></tr>
+			${since === null ? "" : `<tr><th>Since the daily reading</th>${changeCell(since)}</tr>`}
+			<tr><th>Change, 1 day</th>${changeCell(totalChange(series, slugs, lastDate, 1))}</tr>
+			<tr><th>Change, 7 days</th>${changeCell(totalChange(series, slugs, lastDate, 7))}</tr>
+			<tr><th>Change, 30 days</th>${changeCell(totalChange(series, slugs, lastDate, 30))}</tr>
+		</table>`;
+	return card;
+}
+
 // `current` is the live read in use ({counts: Map, at, version}) or null for the recorded
 // numbers. Installs and Hub rank follow it; the change rows are always the recorded daily series.
 function renderCards(series, slugs, lastDate, latest, current) {
@@ -152,6 +182,7 @@ function renderCards(series, slugs, lastDate, latest, current) {
 	const marker = liveMarker(current, true);
 	const holder = document.getElementById("plugins");
 	holder.innerHTML = "";
+	if (slugs.length > 1) holder.appendChild(totalCard(series, slugs, lastDate, current));
 	slugs.forEach((slug, i) => {
 		const byDate = series[slug];
 		const now = byDate[lastDate];
