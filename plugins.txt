@@ -2,3 +2,4 @@
 # e.g. runelite.net/plugin-hub/show/<slug>). To track another plugin, add its
 # slug on a new line - nothing else is needed. Anything after a # is ignored.
 bank-portfolio-tracker
+chat-hover-info
