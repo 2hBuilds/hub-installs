@@ -1,7 +1,7 @@
 {
- "checkedAt": "2026-10-20T08:29:05Z",
- "version": "1.13.2",
- "versionSince": "2026-10-14T18:49:20Z",
+ "checkedAt": "2026-10-20T11:58:46Z",
+ "version": "1.13.3",
+ "versionSince": "2026-10-20T11:58:46Z",
  "plugins": [
   {
    "slug": "bank-portfolio-tracker",
