@@ -1,5 +1,5 @@
 {
- "checkedAt": "2026-10-26T08:51:18Z",
+ "checkedAt": "2026-10-26T20:04:32Z",
  "version": "1.13.4",
  "versionSince": "2026-10-24T18:19:02Z",
  "plugins": [
@@ -7,7 +7,7 @@
    "slug": "bank-portfolio-tracker",
    "name": "2h Bank Portfolio Tracker",
    "author": "2hBuilds",
-   "version": "1.2.1",
+   "version": "1.2.2",
    "status": "ok",
    "reason": null,
    "since": "2026-09-29T04:30:57Z",
@@ -17,7 +17,7 @@
    "slug": "chat-hover-info",
    "name": "2h Chat Hover Info",
    "author": "2hBuilds",
-   "version": "0.0.7",
+   "version": "0.0.8",
    "status": "ok",
    "reason": null,
    "since": "2026-10-08T12:54:42Z",
