@@ -17,9 +17,10 @@ reached, the cards show the recorded numbers; if it stops answering after a good
 that read stays, marked "last live" with its time, for up to 2 hours.
 
 "Live change, 24 hours" is the live number (or, without one, the newest hourly reading) minus the
-hourly reading nearest to 24 hours before it; hovering the row gives the two times. It is
-blank until there is an hourly reading within 90 minutes of that point, so for the first
-day of hourly readings, or after the hourly job has stopped for a while. The Total card's
+hourly reading nearest to 24 hours before it; hovering the row gives the two times. While the
+hourly readings cover less than a day it runs from the oldest of them instead, and says so:
+"since 3:37 PM". It is blank when the readings are older than a day but none is within 90
+minutes of 24 hours back, which happens after the hourly job has stopped for a while. The Total card's
 adds up the plugins' own and is blank unless every plugin has one.
 
 ## Where the numbers come from
