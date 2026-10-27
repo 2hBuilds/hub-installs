@@ -758,6 +758,21 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("timeout-minutes:", step)
         self.assertIn("continue-on-error: true", step)
 
+    def test_the_hourly_reading_never_stops_the_health_check(self):
+        text = self.read("health.yml")
+        step = text[text.index("- name: Record the hourly install counts"):text.index("- name: Check the Plugin Hub")]
+        self.assertIn("continue-on-error: true", step)
+        self.assertIn("run: python3 fetch_installs.py --hourly", step)
+
+    def test_the_commit_runs_after_a_failed_check_but_keeps_its_health_files_out(self):
+        text = self.read("health.yml")
+        step = text[text.index("- name: Commit if the data changed"):text.index("- name: Fire drill")]
+        self.assertIn("if: ${{ !cancelled() }}", step)
+        self.assertIn("steps.health.outputs.changed == 'true' && steps.apply.outcome == 'success'", step)
+        self.assertIn("git add data/hourly.csv", step)
+        # left unstaged, the health files would make pull --rebase refuse
+        self.assertIn('git checkout -- "$f"', step)
+
     def test_the_summary_reaches_the_shell_through_the_environment(self):
         lines = [line.strip() for line in self.read("health.yml").splitlines() if "outputs.summary" in line]
         self.assertEqual(lines, ["SUMMARY: ${{ steps.health.outputs.summary }}"])
@@ -1011,7 +1026,7 @@ class DrillWorkflowTest(unittest.TestCase):
     def test_the_fire_drill_step_is_last_and_runs_only_by_hand_with_the_box_ticked(self):
         text = self.read("health.yml")
         step = text[text.index("      - name: Fire drill"):]
-        self.assertGreater(text.index("      - name: Fire drill"), text.index("- name: Commit if the health changed"))
+        self.assertGreater(text.index("      - name: Fire drill"), text.index("- name: Commit if the data changed"))
         self.assertNotRegex(step[1:], r"\n      - ", "the drill is the last step")
         self.assertEqual(step.splitlines()[1].strip(),
                          "if: success() && github.event_name == 'workflow_dispatch' && inputs.drill == true")

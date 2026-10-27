@@ -31,30 +31,55 @@ jobs:
         with:
           ref: ${{ github.ref }}
 
+      # the page's "Live change, 24 hours" row; never stops the health check, and a run that fails
+      # here leaves one hour without a reading
+      - name: Record the hourly install counts
+        continue-on-error: true
+        timeout-minutes: 3
+        run: python3 fetch_installs.py --hourly
+
       - name: Check the Plugin Hub
         id: health
         run: python3 check_health.py --actions-out "$RUNNER_TEMP/health-actions.json"
 
-      # a failure here skips the commit, so the next run sees the same change and tries again
+      # a failure here keeps the health files out of the commit, so the next run sees the same
+      # change and tries again
       - name: Open or close alert issues
+        id: apply
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: python3 check_health.py --apply "$RUNNER_TEMP/health-actions.json"
 
-      - name: Commit if the health changed
-        if: steps.health.outputs.changed == 'true'
+      # every hour for data/hourly.csv, even after a failed check; the health files only when
+      # their status changed and the issues were opened or closed
+      - name: Commit if the data changed
+        if: ${{ !cancelled() }}
         env:
           SUMMARY: ${{ steps.health.outputs.summary }}
+          HEALTH_CHANGED: ${{ steps.health.outputs.changed == 'true' && steps.apply.outcome == 'success' }}
         run: |
-          git add data/health.json data/health-log.csv
+          if [ "$HEALTH_CHANGED" = "true" ]; then
+            git add data/health.json data/health-log.csv
+          else
+            # not committed, so put back: pull --rebase refuses a tree with unstaged changes
+            for f in data/health.json data/health-log.csv; do
+              git checkout -- "$f" 2>/dev/null || rm -f "$f"
+            done
+          fi
+          git add data/hourly.csv 2>/dev/null || true
           if git diff --cached --quiet; then
-            echo "No change in the health files."
+            echo "No change in data/."
             exit 0
+          fi
+          if git diff --cached --quiet -- data/health.json data/health-log.csv; then
+            message="installs hourly $(date -u +%Y-%m-%dT%H:%MZ)"
+          else
+            message="health: $SUMMARY"
           fi
           git -c user.name="github-actions[bot]" \
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit -m "health: $SUMMARY"
+              commit -m "$message"
           # someone may have pushed to main (a plugins.txt edit) while this ran
           git pull --rebase origin "$GITHUB_REF_NAME"
           git push origin "HEAD:$GITHUB_REF_NAME"

@@ -1,20 +1,26 @@
 # hub-installs
 
 A daily record of how many RuneLite players have each Plugin Hub plugin installed,
-and a page that charts it.
+an hourly one for the last two days, and a page that charts it.
 
 The page: https://2hbuilds.github.io/hub-installs/ (once GitHub Pages is switched on
 for this repository, serving from the root of `main`).
 
-The chart and each card's "Change" rows are the daily recording described below. The
+The chart and each card's "Change, 1 / 7 / 30 days" rows are the daily recording described
+below, so they run up to the last daily reading (03:15 UTC); hovering a row says which. The
 cards' Installs number and Hub rank are read live from RuneLite by the visitor's browser,
 after the page has drawn: two requests, to `static.runelite.net` and `api.runelite.net`,
 at most every 30 minutes while the page is open and none while its tab is hidden. A live
 number carries the time the browser read it; RuneLite's feed is cached for up to 30
-minutes, so the count itself can be that much older. A "Since the daily reading" row
-appears when the live number differs from the day's recording. If RuneLite cannot be
+minutes, so the count itself can be that much older. If RuneLite cannot be
 reached, the cards show the recorded numbers; if it stops answering after a good read,
 that read stays, marked "last live" with its time, for up to 2 hours.
+
+"Live change, 24 hours" is the live number (or, without one, the newest hourly reading) minus the
+hourly reading nearest to 24 hours before it; hovering the row gives the two times. It is
+blank until there is an hourly reading within 90 minutes of that point, so for the first
+day of hourly readings, or after the hourly job has stopped for a while. The Total card's
+adds up the plugins' own and is blank unless every plugin has one.
 
 ## Where the numbers come from
 
@@ -28,6 +34,10 @@ The same two URLs runelite.net reads to show install counts:
 A GitHub Actions job (`.github/workflows/daily.yml`) runs `fetch_installs.py` every day
 at 03:15 UTC and commits the result when it changed. It can also be started by hand
 from the Actions tab (workflow_dispatch).
+
+The hourly availability job (below) also runs `fetch_installs.py --hourly` first, which
+reads the same two URLs and writes only `data/hourly.csv`. A failed hourly reading never
+stops the availability check; that hour simply has no row.
 
 ## Adding a plugin
 
@@ -69,8 +79,8 @@ opened, nothing is committed and the next hourly check tries again.
 
 State lives in `data/health.json` (also shown as a line at the top of the page) and every
 change of status or client version is appended to `data/health-log.csv`:
-`time,plugin,from,to,detail`. The hourly job commits only when a status or a version
-changed; the daily install run checks as well and commits `data/health.json` every day, so
+`time,plugin,from,to,detail`. The hourly job commits the health files only when a status or a version
+changed (it commits `data/hourly.csv` every hour); the daily install run checks as well and commits `data/health.json` every day, so
 the "checked" time on the page is up to a day old while all is well. A page whose last
 check is more than 36 hours old says the check may have stopped.
 
@@ -96,6 +106,9 @@ only tidied up an earlier drill left open, no e-mail came from it: run the drill
   `date,plugin,installs`. An empty `installs` means the plugin was not in the feed that day.
 - `data/all/YYYY-MM-DD.csv` - every Hub plugin on that day: `plugin,installs`, largest first.
 - `data/latest.json` - the most recent day: `{"date", "version", "counts": {slug: installs}}`.
+- `data/hourly.csv` - the tracked plugins, one row per plugin per hourly run:
+  `time,plugin,installs` with `time` like `2026-10-27T10:37:12Z`. Rows older than 48 hours
+  are dropped on each run.
 
 Dates are UTC. Running twice on the same day replaces that day's rows; nothing older is
 ever removed.
@@ -105,6 +118,7 @@ ever removed.
 Python 3, standard library only:
 
     python fetch_installs.py
+    python fetch_installs.py --hourly
     python -m unittest discover -s tests
 
 To look at the page locally, serve the folder (opening `index.html` as a file will not

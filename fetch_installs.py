@@ -1,7 +1,9 @@
 """Fetch RuneLite Plugin Hub install counts and append them to the history in data/.
 
-Run: python fetch_installs.py
+Run: python fetch_installs.py            (the daily reading: installs.csv, all/, latest.json)
+     python fetch_installs.py --hourly   (the hourly reading: hourly.csv only)
 """
+import argparse
 import csv
 import datetime
 import io
@@ -15,6 +17,10 @@ BOOTSTRAP_URL = "https://static.runelite.net/bootstrap.json"
 PLUGINHUB_URL = "https://api.runelite.net/runelite-{version}/pluginhub"
 USER_AGENT = "hub-installs (github.com/2hBuilds)"
 ROOT = os.path.dirname(os.path.abspath(__file__))
+HOURLY_HEADER = ["time", "plugin", "installs"]
+# two days of hourly rows: the page needs the one nearest to 24 hours back, and a few late
+# or missed runs still leave one there
+HOURLY_KEEP = datetime.timedelta(hours=48)
 
 
 class FetchError(Exception):
@@ -129,6 +135,41 @@ def update_series(data_dir, date, tracked, counts):
     write_text(path, csv_text(["date", "plugin", "installs"], rows))
 
 
+def update_hourly(data_dir, now, tracked, counts):
+    """Add this reading's rows to hourly.csv and drop the rows older than HOURLY_KEEP."""
+    path = os.path.join(data_dir, "hourly.csv")
+    stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # the times are all in that one format, so comparing them as text compares them as times
+    cutoff = (now - HOURLY_KEEP).strftime("%Y-%m-%dT%H:%M:%SZ")
+    rows = []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8", newline="") as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            if header != HOURLY_HEADER:
+                raise FetchError("%s has an unexpected header %r" % (path, header))
+            rows = [row for row in reader if row and cutoff <= row[0] != stamp]
+    for slug in tracked:
+        n = counts.get(slug)
+        rows.append([stamp, slug, "" if n is None else str(n)])
+    rows.sort(key=lambda row: (row[0], row[1]))
+    write_text(path, csv_text(HOURLY_HEADER, rows))
+
+
+def record_hour(root=ROOT, fetch=None, now=None):
+    """The hourly reading: the tracked plugins' counts into data/hourly.csv, nothing else."""
+    fetch = fetch or fetch_json
+    now = (now or datetime.datetime.now(datetime.timezone.utc)).replace(microsecond=0)
+    tracked = read_tracked(os.path.join(root, "plugins.txt"))
+    version = client_version(fetch(BOOTSTRAP_URL))
+    counts = parse_counts(fetch(PLUGINHUB_URL.format(version=version)))
+    update_hourly(os.path.join(root, "data"), now, tracked, counts)
+    print("%s: client %s" % (now.strftime("%Y-%m-%dT%H:%M:%SZ"), version))
+    for slug in tracked:
+        print("  %s: %s" % (slug, counts.get(slug, "MISSING from the feed")))
+    return [slug for slug in tracked if slug not in counts]
+
+
 def run(root=ROOT, fetch=None, today=None):
     fetch = fetch or fetch_json
     date = today or datetime.datetime.now(datetime.timezone.utc).date().isoformat()
@@ -146,9 +187,12 @@ def run(root=ROOT, fetch=None, today=None):
     return missing
 
 
-def main(root=ROOT):
+def main(root=ROOT, argv=()):
+    parser = argparse.ArgumentParser(description="Record Plugin Hub install counts.")
+    parser.add_argument("--hourly", action="store_true", help="write only the hourly reading to data/hourly.csv")
+    args = parser.parse_args(argv)
     try:
-        run(root)
+        record_hour(root) if args.hourly else run(root)
     except (FetchError, OSError, csv.Error) as e:
         print("error: %s" % e, file=sys.stderr)
         return 1
@@ -160,4 +204,4 @@ def main(root=ROOT):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(argv=sys.argv[1:]))

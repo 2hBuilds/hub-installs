@@ -130,6 +130,58 @@ function changeCell(value) {
 	return `<td class="${cls}">${signed(value)}</td>`;
 }
 
+// The Change rows run from one 03:15 UTC daily reading to another, so they say which.
+function changeRows(lastDate, cell) {
+	const title = esc(`Up to the last daily reading, ${lastDate} 03:15 UTC`);
+	return [1, 7, 30].map(days =>
+		`<tr title="${title}"><th>Change, ${days} day${days === 1 ? "" : "s"}</th>${cell(days)}</tr>`).join("");
+}
+
+function parseHourly(text) {
+	// time,plugin,installs -> {slug: [{t, n}] oldest first}; a missing count is skipped
+	const hourly = {};
+	for (const line of text.trim().split(/\r?\n/).slice(1)) {
+		const [time, slug, raw] = line.split(",");
+		const t = Date.parse(time);
+		if (!slug || isNaN(t) || raw === "" || raw === undefined) continue;
+		(hourly[slug] = hourly[slug] || []).push({ t, n: Number(raw) });
+	}
+	for (const list of Object.values(hourly)) list.sort((a, b) => a.t - b.t);
+	return hourly;
+}
+
+// How far the reading used for "24 hours ago" may be from exactly that: the hourly job can run late.
+const DAY_BACK_SLACK_MS = 90 * 60 * 1000;
+
+// The hourly reading nearest to 24 hours before `t`, or null when none is within DAY_BACK_SLACK_MS,
+// which keeps the row blank until a day of hourly readings exists.
+function dayBefore(readings, t) {
+	let best = null;
+	for (const r of readings || []) {
+		const off = Math.abs(r.t - (t - DAY));
+		if (off <= DAY_BACK_SLACK_MS && (!best || off < Math.abs(best.t - (t - DAY)))) best = r;
+	}
+	return best;
+}
+
+// One plugin's "Live change, 24 hours": its live count, or its newest hourly reading when there is no
+// live one, minus its hourly reading of a day before that. {value, from, to, live} or null.
+function lastDay(readings, current, slug) {
+	const count = current ? current.counts.get(slug) : undefined;
+	const live = Number.isInteger(count);
+	const now = live ? { t: current.at, n: count } : (readings || []).at(-1);
+	const then = now && dayBefore(readings, now.t);
+	return then ? { value: now.n - then.n, from: then.t, to: now.t, live } : null;
+}
+
+const whenOf = t => new Date(t).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
+
+function lastDayRow(day) {
+	const title = !day ? "Shown once there are 24 hours of hourly readings"
+		: `From the hourly reading of ${whenOf(day.from)} to the ${day.live ? "live read" : "hourly reading"} of ${whenOf(day.to)}`;
+	return `<tr title="${esc(title)}"><th>Live change, 24 hours</th>${changeCell(day ? day.value : null)}</tr>`;
+}
+
 function swatch(i) {
 	const c = COLOURS[i % COLOURS.length];
 	return i < COLOURS.length ? c : `repeating-linear-gradient(90deg, ${c} 0 4px, transparent 4px 6px)`;
@@ -157,49 +209,50 @@ function totalChange(series, slugs, lastDate, days) {
 
 // The card ahead of the plugins when two or more are shown: the live figures added up when every
 // plugin has one, else the recorded figures of the last date. No Hub rank, that is per plugin.
-function totalCard(series, slugs, lastDate, current) {
+// Its "Live change, 24 hours" adds up the plugins' own, and is blank unless every plugin has one.
+function totalCard(series, slugs, lastDate, current, days) {
 	const now = sum(slugs.map(s => series[s][lastDate]));
 	const liveSum = current && slugs.every(s => current.counts.has(s)) ? sum(slugs.map(s => current.counts.get(s))) : null;
-	const since = liveSum !== null && liveSum !== now ? liveSum - now : null;
+	const day = days.every(d => d) ? {
+		value: sum(days.map(d => d.value)), live: days.every(d => d.live),
+		from: Math.min(...days.map(d => d.from)), to: Math.max(...days.map(d => d.to))
+	} : null;
 	const card = document.createElement("section");
 	card.className = "card";
 	card.innerHTML = `
 		<h2><span class="swatch" style="background:var(--text)"></span><span>Total</span></h2>
 		<table>
 			<tr><th>Installs</th><td>${fmt(liveSum === null ? now : liveSum)}${liveSum === null ? "" : liveMarker(current, true)}</td></tr>
-			${since === null ? "" : `<tr><th>Since the daily reading</th>${changeCell(since)}</tr>`}
-			<tr><th>Change, 1 day</th>${changeCell(totalChange(series, slugs, lastDate, 1))}</tr>
-			<tr><th>Change, 7 days</th>${changeCell(totalChange(series, slugs, lastDate, 7))}</tr>
-			<tr><th>Change, 30 days</th>${changeCell(totalChange(series, slugs, lastDate, 30))}</tr>
+				${lastDayRow(day)}
+			${changeRows(lastDate, n => changeCell(totalChange(series, slugs, lastDate, n)))}
 		</table>`;
 	return card;
 }
 
 // `current` is the live read in use ({counts: Map, at, version}) or null for the recorded
-// numbers. Installs and Hub rank follow it; the change rows are always the recorded daily series.
-function renderCards(series, slugs, lastDate, latest, current) {
+// numbers. Installs, Hub rank and "Live change, 24 hours" follow it; the Change rows are always the
+// recorded daily series.
+function renderCards(series, hourly, slugs, lastDate, latest, current) {
 	const all = current ? [...current.counts.values()] : Object.values(latest.counts);
 	const marker = liveMarker(current, true);
+	const days = slugs.map(slug => lastDay(hourly[slug], current, slug));
 	const holder = document.getElementById("plugins");
 	holder.innerHTML = "";
-	if (slugs.length > 1) holder.appendChild(totalCard(series, slugs, lastDate, current));
+	if (slugs.length > 1) holder.appendChild(totalCard(series, slugs, lastDate, current, days));
 	slugs.forEach((slug, i) => {
 		const byDate = series[slug];
 		const now = byDate[lastDate];
 		const count = current ? current.counts.get(slug) : latest.counts[slug];
 		const shown = current ? count : now;
 		const rank = count === undefined ? null : 1 + all.filter(n => n > count).length;
-		const since = current && Number.isInteger(count) && Number.isInteger(now) && count !== now ? count - now : null;
 		const card = document.createElement("section");
 		card.className = "card";
 		card.innerHTML = `
 			<h2><span class="swatch" style="background:${swatch(i)}"></span><span></span></h2>
 			<table>
 				<tr><th>Installs</th><td>${shown === null || shown === undefined ? '<span class="blank">not in the feed</span>' : fmt(shown)}${marker}</td></tr>
-				${since === null ? "" : `<tr><th>Since the daily reading</th>${changeCell(since)}</tr>`}
-				<tr><th>Change, 1 day</th>${changeCell(change(byDate, lastDate, 1))}</tr>
-				<tr><th>Change, 7 days</th>${changeCell(change(byDate, lastDate, 7))}</tr>
-				<tr><th>Change, 30 days</th>${changeCell(change(byDate, lastDate, 30))}</tr>
+				${lastDayRow(days[i])}
+				${changeRows(lastDate, n => changeCell(change(byDate, lastDate, n)))}
 				<tr><th>Hub rank</th><td>${rank === null ? '<span class="blank">-</span>' : `${fmt(rank)} of ${fmt(all.length)}${liveMarker(current, false)}`}</td></tr>
 			</table>`;
 		card.querySelector("h2 span:last-child").textContent = slug;
@@ -259,9 +312,11 @@ function renderChart(series, slugs, firstDate, lastDate, days) {
 async function load() {
 	const note = document.getElementById("note");
 	try {
-		const [csvText, latest] = await Promise.all([
+		const [csvText, latest, hourlyText] = await Promise.all([
 			fetch("data/installs.csv", { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error("data/installs.csv: " + r.status); return r.text(); }),
-			fetch("data/latest.json", { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error("data/latest.json: " + r.status); return r.json(); })
+			fetch("data/latest.json", { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error("data/latest.json: " + r.status); return r.json(); }),
+			// optional: without it the "Live change, 24 hours" rows stay blank
+			fetch("data/hourly.csv", { cache: "no-cache" }).then(r => r.ok ? r.text() : "").catch(() => "")
 		]);
 		const series = parseSeries(csvText);
 		const dates = [...new Set(Object.values(series).flatMap(Object.keys))].sort();
@@ -274,7 +329,7 @@ async function load() {
 		// the last day are the ones tracked now; a removed plugin drops off the page.
 		const slugs = Object.keys(series).filter(s => lastDate in series[s]);
 		recorded = {
-			series, slugs, lastDate, latest,
+			series, hourly: parseHourly(hourlyText), slugs, lastDate, latest,
 			note: `Latest data: ${latest.date} (UTC), RuneLite ${latest.version}, `
 				+ `${fmt(Object.keys(latest.counts).length)} plugins on the Hub. `
 				+ `History from ${firstDate}.`
@@ -298,15 +353,16 @@ async function load() {
 
 // Live numbers: after the recorded page is drawn, this browser reads the same two URLs
 // fetch_installs.py reads, and the cards' Installs and Hub rank show what they say now.
-// The chart and the change rows stay the daily recording: those readings are taken at
-// the same hour each day, and the counts wobble through the day.
+// The chart and the Change rows stay the daily recording: those readings are taken at
+// the same hour each day, and the counts wobble through the day. "Live change, 24 hours" sets
+// the live count against data/hourly.csv.
 const BOOTSTRAP_URL = "https://static.runelite.net/bootstrap.json";
 const LIVE_EVERY_MS = 30 * 60 * 1000;    // the feed's own max-age; never read more often
 const LIVE_KEEP_MS = 2 * 60 * 60 * 1000; // no good read for this long: back to the recorded numbers
 const LIVE_TIMEOUT_MS = 30 * 1000;
 const VERSION = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,39}$/;
 
-let recorded = null;     // {series, slugs, lastDate, latest, note} from data/
+let recorded = null;     // {series, hourly, slugs, lastDate, latest, note} from data/
 let live = null;         // the last good live read: {counts: Map, at, version, fromBootstrap}
 let liveFailed = false;  // the read after it failed
 let lastTry = 0, reading = false, readTimer = 0, expireTimer = 0;
@@ -316,14 +372,14 @@ const timeOf = t => new Date(t).toLocaleTimeString(undefined, { hour: "numeric",
 const liveNow = () => live && Date.now() - live.at < LIVE_KEEP_MS ? live : null;
 
 function draw() {
-	const { series, slugs, lastDate, latest, note } = recorded;
+	const { series, hourly, slugs, lastDate, latest, note } = recorded;
 	const current = liveNow();
 	// the version is named so a read that fell back to the recorded one is not mistaken for current
 	const from = !current ? "" : `RuneLite ${current.version}${current.fromBootstrap ? "" : " (the recorded version)"}`;
 	document.getElementById("note").textContent = note + (!current ? ""
 		: liveFailed ? ` Installs and rank on the cards are live from ${from} as of ${timeOf(current.at)}; RuneLite has not answered since.`
 		: ` Installs and rank on the cards are live from ${from}, read ${timeOf(current.at)}.`);
-	renderCards(series, slugs, lastDate, latest, current);
+	renderCards(series, hourly, slugs, lastDate, latest, current);
 }
 
 // A plain GET with no custom header, so no CORS preflight, and through the browser's

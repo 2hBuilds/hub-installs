@@ -1,5 +1,6 @@
 import contextlib
 import csv
+import datetime
 import io
 import json
 import os
@@ -131,6 +132,66 @@ class LatestTest(unittest.TestCase):
             with open(os.path.join(root, "data", "latest.json"), encoding="utf-8") as f:
                 latest = json.load(f)
             self.assertEqual(latest, {"date": "2026-09-27", "version": "1.12.39", "counts": {"a": 3, "b": 4}})
+
+
+def at(text):
+    return datetime.datetime.strptime(text, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=datetime.timezone.utc)
+
+
+def read_hourly(root):
+    with open(os.path.join(root, "data", "hourly.csv"), encoding="utf-8", newline="") as f:
+        return list(csv.reader(f))
+
+
+class HourlyTest(unittest.TestCase):
+    def test_writes_only_hourly_csv_for_the_tracked_plugins(self):
+        with tempfile.TemporaryDirectory() as root:
+            write_plugins(root, "a", "gone")
+            missing = fetch_installs.record_hour(root, fake_fetch({"a": 3, "big": 900}), at("2026-10-27T10:37:12"))
+            self.assertEqual(missing, ["gone"])
+            self.assertEqual(read_hourly(root), [
+                ["time", "plugin", "installs"],
+                ["2026-10-27T10:37:12Z", "a", "3"],
+                ["2026-10-27T10:37:12Z", "gone", ""],
+            ])
+            self.assertEqual(os.listdir(os.path.join(root, "data")), ["hourly.csv"])
+
+    def test_keeps_48_hours_and_drops_older_rows(self):
+        with tempfile.TemporaryDirectory() as root:
+            write_plugins(root, "a")
+            for when, n in (("2026-10-25T10:00:00", 1), ("2026-10-25T11:00:00", 2),
+                            ("2026-10-26T11:00:00", 3), ("2026-10-27T11:00:00", 4)):
+                fetch_installs.record_hour(root, fake_fetch({"a": n}), at(when))
+            self.assertEqual([row[0] for row in read_hourly(root)[1:]],
+                             ["2026-10-25T11:00:00Z", "2026-10-26T11:00:00Z", "2026-10-27T11:00:00Z"])
+
+    def test_the_same_second_twice_replaces_rather_than_duplicates(self):
+        with tempfile.TemporaryDirectory() as root:
+            write_plugins(root, "a")
+            fetch_installs.record_hour(root, fake_fetch({"a": 1}), at("2026-10-27T10:00:00"))
+            fetch_installs.record_hour(root, fake_fetch({"a": 2}), at("2026-10-27T10:00:00"))
+            self.assertEqual(read_hourly(root)[1:], [["2026-10-27T10:00:00Z", "a", "2"]])
+
+    def test_a_bad_feed_leaves_the_file_alone(self):
+        with tempfile.TemporaryDirectory() as root:
+            write_plugins(root, "a")
+            fetch_installs.record_hour(root, fake_fetch({"a": 1}), at("2026-10-27T10:00:00"))
+            before = read_hourly(root)
+            with self.assertRaises(fetch_installs.FetchError):
+                fetch_installs.record_hour(root, fake_fetch({"a": -1}), at("2026-10-27T11:00:00"))
+            self.assertEqual(read_hourly(root), before)
+
+    def test_main_hourly_flag_records_the_hour_only(self):
+        original = fetch_installs.fetch_json
+        fetch_installs.fetch_json = fake_fetch({"a": 5})
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                write_plugins(root, "a")
+                self.assertEqual(fetch_installs.main(root, ["--hourly"]), 0)
+                self.assertEqual(os.listdir(os.path.join(root, "data")), ["hourly.csv"])
+                self.assertEqual(read_hourly(root)[1][1:], ["a", "5"])
+        finally:
+            fetch_installs.fetch_json = original
 
 
 class FailureTest(unittest.TestCase):
