@@ -4,3 +4,4 @@
 bank-portfolio-tracker
 chat-hover-info
 why-lag
+chat-mentions
