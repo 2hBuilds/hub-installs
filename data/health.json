@@ -1,5 +1,5 @@
 {
- "checkedAt": "2026-10-28T09:36:44Z",
+ "checkedAt": "2026-10-28T19:46:58Z",
  "version": "1.13.4",
  "versionSince": "2026-10-24T18:19:02Z",
  "plugins": [
@@ -17,7 +17,7 @@
    "slug": "chat-hover-info",
    "name": "2h Chat Hover Info",
    "author": "2hBuilds",
-   "version": "1.0.0",
+   "version": "1.0.1",
    "status": "ok",
    "reason": null,
    "since": "2026-10-08T12:54:42Z",
