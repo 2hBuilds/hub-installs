@@ -17,11 +17,12 @@ reached, the cards show the recorded numbers; if it stops answering after a good
 that read stays, marked "last live" with its time, for up to 2 hours.
 
 "Live change, 24 hours" is the live number (or, without one, the newest hourly reading) minus the
-hourly reading nearest to 24 hours before it; hovering the row gives the two times. While the
-hourly readings cover less than a day it runs from the oldest of them instead, and says so:
-"since 3:37 PM". It is blank when the readings are older than a day but none is within 90
-minutes of 24 hours back, which happens after the hourly job has stopped for a while. The Total card's
-adds up the plugins' own and is blank unless every plugin has one.
+hourly reading nearest to 24 hours before it; hovering the row gives the two times. GitHub runs
+scheduled jobs late or skips them when it is busy, so the "hourly" readings often come 3 to 6
+hours apart. When the nearest reading is more than 90 minutes off 24 hours back (and on the first
+day, when there is none that old yet), the number says where it starts: "since 5:27 PM", or
+"since Mon 5:27 PM" when that is over a day ago. The Total card's adds up the plugins' own and
+is blank unless every plugin has one.
 
 ## Where the numbers come from
 

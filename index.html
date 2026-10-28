@@ -150,43 +150,44 @@ function parseHourly(text) {
 	return hourly;
 }
 
-// How far the reading used for "24 hours ago" may be from exactly that: the hourly job can run late.
+// A span this close to 24 hours counts as 24 hours; any other is shown next to the number.
+// GitHub runs the "hourly" job late or not at all when it is busy, often 3 to 6 hours apart.
 const DAY_BACK_SLACK_MS = 90 * 60 * 1000;
 
-// The hourly reading nearest to 24 hours before `t`, or null when none is within DAY_BACK_SLACK_MS.
+// The hourly reading before `t` nearest to 24 hours before it, or null when there is none.
 function dayBefore(readings, t) {
 	let best = null;
 	for (const r of readings || []) {
 		const off = Math.abs(r.t - (t - DAY));
-		if (off <= DAY_BACK_SLACK_MS && (!best || off < Math.abs(best.t - (t - DAY)))) best = r;
+		if (r.t < t && (!best || off < Math.abs(best.t - (t - DAY)))) best = r;
 	}
 	return best;
 }
 
 // One plugin's "Live change, 24 hours": its live count, or its newest hourly reading when there is no
-// live one, minus its hourly reading of a day before that. While the hourly readings are younger than
-// that, it runs from the oldest of them instead and is marked partial; when they are older but none
-// is near 24 hours back (the hourly job stopped for a while), it is blank. {value, from, to, live, partial} or null.
+// live one, minus its hourly reading nearest to a day before that. `inexact` when that reading is
+// more than DAY_BACK_SLACK_MS off 24 hours back (the first day, or a gap in the readings).
+// {value, from, to, live, inexact} or null.
 function lastDay(readings, current, slug) {
 	const count = current ? current.counts.get(slug) : undefined;
 	const live = Number.isInteger(count);
 	const now = live ? { t: current.at, n: count } : (readings || []).at(-1);
-	if (!now) return null;
-	let then = dayBefore(readings, now.t);
-	const oldest = (readings || [])[0];
-	const partial = !then && oldest.t > now.t - DAY && oldest.t < now.t;
-	if (partial) then = oldest;
-	return then ? { value: now.n - then.n, from: then.t, to: now.t, live, partial } : null;
+	const then = now && dayBefore(readings, now.t);
+	if (!then) return null;
+	const inexact = Math.abs(then.t - (now.t - DAY)) > DAY_BACK_SLACK_MS;
+	return { value: now.n - then.n, from: then.t, to: now.t, live, inexact };
 }
 
 const whenOf = t => new Date(t).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
 
 function lastDayRow(day) {
 	const span = !day ? "" : `from the hourly reading of ${whenOf(day.from)} to the ${day.live ? "live read" : "hourly reading"} of ${whenOf(day.to)}`;
-	const title = !day ? "No hourly reading from about 24 hours back"
-		: day.partial ? `Fewer than 24 hours of hourly readings so far: ${span}` : span[0].toUpperCase() + span.slice(1);
+	const title = !day ? "No hourly readings yet"
+		: day.inexact ? `Not exactly 24 hours, the nearest hourly reading: ${span}` : span[0].toUpperCase() + span.slice(1);
 	const cell = changeCell(day ? day.value : null);
-	const since = day && day.partial ? `<span class="live">since ${esc(timeOf(day.from))}</span>` : "";
+	// a time alone is enough within the last day; past that it needs the weekday
+	const from = day && (day.to - day.from < DAY ? timeOf(day.from) : whenOf(day.from));
+	const since = day && day.inexact ? `<span class="live">since ${esc(from)}</span>` : "";
 	return `<tr title="${esc(title)}"><th>Live change, 24 hours</th>${since ? cell.replace("</td>", since + "</td>") : cell}</tr>`;
 }
 
@@ -222,7 +223,7 @@ function totalCard(series, slugs, lastDate, current, days) {
 	const now = sum(slugs.map(s => series[s][lastDate]));
 	const liveSum = current && slugs.every(s => current.counts.has(s)) ? sum(slugs.map(s => current.counts.get(s))) : null;
 	const day = days.every(d => d) ? {
-		value: sum(days.map(d => d.value)), live: days.every(d => d.live), partial: days.some(d => d.partial),
+		value: sum(days.map(d => d.value)), live: days.every(d => d.live), inexact: days.some(d => d.inexact),
 		from: Math.min(...days.map(d => d.from)), to: Math.max(...days.map(d => d.to))
 	} : null;
 	const card = document.createElement("section");
