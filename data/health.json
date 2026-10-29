@@ -1,5 +1,5 @@
 {
- "checkedAt": "2026-10-29T09:55:08Z",
+ "checkedAt": "2026-10-29T23:30:27Z",
  "version": "1.13.4",
  "versionSince": "2026-10-24T18:19:02Z",
  "plugins": [
@@ -17,7 +17,7 @@
    "slug": "chat-hover-info",
    "name": "2h Chat Hover Info",
    "author": "2hBuilds",
-   "version": "1.0.1",
+   "version": "1.1.0",
    "status": "ok",
    "reason": null,
    "since": "2026-10-08T12:54:42Z",
@@ -27,7 +27,7 @@
    "slug": "chat-mentions",
    "name": "2h Chat Mentions",
    "author": "2hBuilds",
-   "version": "1.1.0",
+   "version": "1.1.1",
    "status": "ok",
    "reason": null,
    "since": "2026-10-29T05:55:42Z",
