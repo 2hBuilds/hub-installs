@@ -32,7 +32,8 @@ jobs:
           ref: ${{ github.ref }}
 
       # the page's "Live change, 24 hours" row; never stops the health check, and a run that fails
-      # here leaves one hour without a reading
+      # here leaves one hour without a reading. From 12:00 UTC it also records the day when the daily
+      # job has not (GitHub sometimes skips a scheduled run), so no day goes missing.
       - name: Record the hourly install counts
         continue-on-error: true
         timeout-minutes: 3
@@ -68,14 +69,18 @@ jobs:
             done
           fi
           git add data/hourly.csv 2>/dev/null || true
+          # the day's files, when the hourly reading caught up a day the daily job missed
+          git add data/installs.csv data/latest.json data/all 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "No change in data/."
             exit 0
           fi
-          if git diff --cached --quiet -- data/health.json data/health-log.csv; then
-            message="installs hourly $(date -u +%Y-%m-%dT%H:%MZ)"
-          else
+          if ! git diff --cached --quiet -- data/health.json data/health-log.csv; then
             message="health: $SUMMARY"
+          elif ! git diff --cached --quiet -- data/installs.csv; then
+            message="installs $(date -u +%Y-%m-%d) (caught up by the hourly run)"
+          else
+            message="installs hourly $(date -u +%Y-%m-%dT%H:%MZ)"
           fi
           git -c user.name="github-actions[bot]" \
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \

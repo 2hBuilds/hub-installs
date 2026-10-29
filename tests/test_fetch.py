@@ -181,17 +181,74 @@ class HourlyTest(unittest.TestCase):
                 fetch_installs.record_hour(root, fake_fetch({"a": -1}), at("2026-10-27T11:00:00"))
             self.assertEqual(read_hourly(root), before)
 
-    def test_main_hourly_flag_records_the_hour_only(self):
+    def test_main_hourly_flag_records_the_hour(self):
+        # main reads the real clock, so from 12:00 UTC the catch-up may add the day's files too;
+        # CatchUpTest pins the clock for those
         original = fetch_installs.fetch_json
         fetch_installs.fetch_json = fake_fetch({"a": 5})
         try:
             with tempfile.TemporaryDirectory() as root:
                 write_plugins(root, "a")
                 self.assertEqual(fetch_installs.main(root, ["--hourly"]), 0)
-                self.assertEqual(os.listdir(os.path.join(root, "data")), ["hourly.csv"])
+                self.assertIn("hourly.csv", os.listdir(os.path.join(root, "data")))
                 self.assertEqual(read_hourly(root)[1][1:], ["a", "5"])
         finally:
             fetch_installs.fetch_json = original
+
+
+def latest_date(root):
+    with open(os.path.join(root, "data", "latest.json"), encoding="utf-8") as f:
+        return json.load(f)["date"]
+
+
+class CatchUpTest(unittest.TestCase):
+    def test_before_noon_the_hourly_reading_leaves_the_day_alone(self):
+        with tempfile.TemporaryDirectory() as root:
+            write_plugins(root, "a")
+            fetch_installs.record_hour(root, fake_fetch({"a": 3}), at("2026-10-29T11:59:59"))
+            self.assertEqual(os.listdir(os.path.join(root, "data")), ["hourly.csv"])
+
+    def test_from_noon_with_no_daily_recording_it_records_the_day(self):
+        with tempfile.TemporaryDirectory() as root:
+            write_plugins(root, "a", "gone")
+            fetch_installs.record_hour(root, fake_fetch({"a": 3, "big": 900}), at("2026-10-29T12:00:00"))
+            self.assertEqual(latest_date(root), "2026-10-29")
+            self.assertEqual(read_series(root)[1:], [["2026-10-29", "a", "3"], ["2026-10-29", "gone", ""]])
+            self.assertTrue(os.path.exists(os.path.join(root, "data", "all", "2026-10-29.csv")))
+            self.assertEqual(read_hourly(root)[1][1:], ["a", "3"])
+
+    def test_a_day_the_daily_job_recorded_is_left_as_it_is(self):
+        with tempfile.TemporaryDirectory() as root:
+            write_plugins(root, "a")
+            fetch_installs.run(root, fake_fetch({"a": 7}), "2026-10-29")
+            before = read_series(root)
+            fetch_installs.record_hour(root, fake_fetch({"a": 9}), at("2026-10-29T15:37:00"))
+            self.assertEqual(read_series(root), before)
+            self.assertEqual(read_hourly(root)[1][1:], ["a", "9"])
+
+    def test_yesterdays_recording_does_not_count_for_today(self):
+        with tempfile.TemporaryDirectory() as root:
+            write_plugins(root, "a")
+            fetch_installs.run(root, fake_fetch({"a": 7}), "2026-10-28")
+            fetch_installs.record_hour(root, fake_fetch({"a": 9}), at("2026-10-29T13:00:00"))
+            self.assertEqual(read_series(root)[1:], [["2026-10-28", "a", "7"], ["2026-10-29", "a", "9"]])
+            self.assertEqual(latest_date(root), "2026-10-29")
+
+    def test_a_late_daily_run_replaces_the_caught_up_rows(self):
+        with tempfile.TemporaryDirectory() as root:
+            write_plugins(root, "a")
+            fetch_installs.record_hour(root, fake_fetch({"a": 9}), at("2026-10-29T13:00:00"))
+            fetch_installs.run(root, fake_fetch({"a": 11}), "2026-10-29")
+            self.assertEqual(read_series(root)[1:], [["2026-10-29", "a", "11"]])
+
+    def test_an_unreadable_latest_json_counts_as_no_recording(self):
+        with tempfile.TemporaryDirectory() as root:
+            write_plugins(root, "a")
+            os.makedirs(os.path.join(root, "data"))
+            with open(os.path.join(root, "data", "latest.json"), "w", encoding="utf-8") as f:
+                f.write("not json")
+            fetch_installs.record_hour(root, fake_fetch({"a": 4}), at("2026-10-29T18:00:00"))
+            self.assertEqual(latest_date(root), "2026-10-29")
 
 
 class FailureTest(unittest.TestCase):

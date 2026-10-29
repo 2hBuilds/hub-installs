@@ -1,7 +1,8 @@
 """Fetch RuneLite Plugin Hub install counts and append them to the history in data/.
 
 Run: python fetch_installs.py            (the daily reading: installs.csv, all/, latest.json)
-     python fetch_installs.py --hourly   (the hourly reading: hourly.csv only)
+     python fetch_installs.py --hourly   (the hourly reading: hourly.csv; from 12:00 UTC it also
+                                          records the day when the daily job has not yet)
 """
 import argparse
 import csv
@@ -21,6 +22,9 @@ HOURLY_HEADER = ["time", "plugin", "installs"]
 # two days of hourly rows: the page needs the one nearest to 24 hours back, and a few late
 # or missed runs still leave one there
 HOURLY_KEEP = datetime.timedelta(hours=48)
+# from this hour (UTC) an hourly reading records the day when the daily job has not: the daily job is
+# scheduled for 03:15 UTC and GitHub has started it by about 10:00 UTC, so later than that it was skipped
+CATCH_UP_FROM_HOUR = 12
 
 
 class FetchError(Exception):
@@ -156,15 +160,43 @@ def update_hourly(data_dir, now, tracked, counts):
     write_text(path, csv_text(HOURLY_HEADER, rows))
 
 
+def recorded_day(data_dir):
+    """The date data/latest.json was written for, or None when there is none or it cannot be read."""
+    try:
+        with open(os.path.join(data_dir, "latest.json"), encoding="utf-8") as f:
+            date = json.load(f).get("date")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return date if isinstance(date, str) else None
+
+
+def write_daily(data_dir, date, version, counts, tracked):
+    """The daily recording: the day's file, latest.json and today's rows in installs.csv."""
+    write_day(data_dir, date, counts)
+    write_latest(data_dir, date, version, counts)
+    update_series(data_dir, date, tracked, counts)
+
+
 def record_hour(root=ROOT, fetch=None, now=None):
-    """The hourly reading: the tracked plugins' counts into data/hourly.csv, nothing else."""
+    """The hourly reading: the tracked plugins' counts into data/hourly.csv.
+
+    The catch-up: from CATCH_UP_FROM_HOUR (UTC) on, when the daily job has not recorded today yet, this
+    reading also records the day. GitHub starts scheduled runs late and now and then not at all; the daily
+    job normally lands by 10:00 UTC, so on an ordinary day this never fires, and a daily run that comes
+    later the same day replaces the caught-up rows.
+    """
     fetch = fetch or fetch_json
     now = (now or datetime.datetime.now(datetime.timezone.utc)).replace(microsecond=0)
     tracked = read_tracked(os.path.join(root, "plugins.txt"))
     version = client_version(fetch(BOOTSTRAP_URL))
     counts = parse_counts(fetch(PLUGINHUB_URL.format(version=version)))
-    update_hourly(os.path.join(root, "data"), now, tracked, counts)
+    data_dir = os.path.join(root, "data")
+    update_hourly(data_dir, now, tracked, counts)
     print("%s: client %s" % (now.strftime("%Y-%m-%dT%H:%M:%SZ"), version))
+    today = now.date().isoformat()
+    if now.hour >= CATCH_UP_FROM_HOUR and recorded_day(data_dir) != today:
+        write_daily(data_dir, today, version, counts, tracked)
+        print("  caught up: no daily recording for %s yet, so this reading records the day" % today)
     for slug in tracked:
         print("  %s: %s" % (slug, counts.get(slug, "MISSING from the feed")))
     return [slug for slug in tracked if slug not in counts]
@@ -177,9 +209,7 @@ def run(root=ROOT, fetch=None, today=None):
     version = client_version(fetch(BOOTSTRAP_URL))
     counts = parse_counts(fetch(PLUGINHUB_URL.format(version=version)))
     data_dir = os.path.join(root, "data")
-    write_day(data_dir, date, counts)
-    write_latest(data_dir, date, version, counts)
-    update_series(data_dir, date, tracked, counts)
+    write_daily(data_dir, date, version, counts, tracked)
     missing = [slug for slug in tracked if slug not in counts]
     print("%s: client %s, %d plugins in the feed" % (date, version, len(counts)))
     for slug in tracked:

@@ -38,8 +38,15 @@ at 03:15 UTC and commits the result when it changed. It can also be started by h
 from the Actions tab (workflow_dispatch).
 
 The hourly availability job (below) also runs `fetch_installs.py --hourly` first, which
-reads the same two URLs and writes only `data/hourly.csv`. A failed hourly reading never
+reads the same two URLs and writes `data/hourly.csv`. A failed hourly reading never
 stops the availability check; that hour simply has no row.
+
+GitHub sometimes skips a scheduled run outright, not only starts it late. So from 12:00 UTC
+an hourly reading also records the day (`installs.csv`, `latest.json`, `all/`) when the daily
+job has not recorded it yet; its commit says "caught up by the hourly run". The daily job
+normally lands by 10:00 UTC, so on an ordinary day the catch-up never fires, and a daily run
+that comes later the same day replaces the caught-up rows. No day goes missing while the
+hourly job runs at least once in the afternoon.
 
 ## Adding a plugin
 
