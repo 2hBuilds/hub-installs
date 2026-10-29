@@ -1,5 +1,5 @@
 {
- "checkedAt": "2026-10-29T00:16:21Z",
+ "checkedAt": "2026-10-29T05:55:42Z",
  "version": "1.13.4",
  "versionSince": "2026-10-24T18:19:02Z",
  "plugins": [
@@ -21,6 +21,16 @@
    "status": "ok",
    "reason": null,
    "since": "2026-10-08T12:54:42Z",
+   "warning": null
+  },
+  {
+   "slug": "chat-mentions",
+   "name": "2h Chat Mentions",
+   "author": "2hBuilds",
+   "version": "1.0.0",
+   "status": "ok",
+   "reason": null,
+   "since": "2026-10-29T05:55:42Z",
    "warning": null
   },
   {
