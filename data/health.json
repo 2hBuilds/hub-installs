@@ -1,5 +1,5 @@
 {
- "checkedAt": "2026-10-29T23:30:27Z",
+ "checkedAt": "2026-10-30T02:51:21Z",
  "version": "1.13.4",
  "versionSince": "2026-10-24T18:19:02Z",
  "plugins": [
@@ -37,7 +37,7 @@
    "slug": "why-lag",
    "name": "2h Why Lag",
    "author": "2hBuilds",
-   "version": "1.0.0",
+   "version": "1.0.1",
    "status": "ok",
    "reason": null,
    "since": "2026-10-08T12:54:42Z",
