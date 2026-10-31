@@ -1,8 +1,4 @@
 time,plugin,installs
-2026-10-29T19:10:13Z,bank-portfolio-tracker,169
-2026-10-29T19:10:13Z,chat-hover-info,74
-2026-10-29T19:10:13Z,chat-mentions,1
-2026-10-29T19:10:13Z,why-lag,577
 2026-10-29T23:30:26Z,bank-portfolio-tracker,171
 2026-10-29T23:30:26Z,chat-hover-info,74
 2026-10-29T23:30:26Z,chat-mentions,1
@@ -40,3 +36,8 @@ time,plugin,installs
 2026-10-31T15:28:41Z,chat-mentions,4
 2026-10-31T15:28:41Z,gp-per-xp,
 2026-10-31T15:28:41Z,why-lag,587
+2026-10-31T19:29:12Z,bank-portfolio-tracker,191
+2026-10-31T19:29:12Z,chat-hover-info,75
+2026-10-31T19:29:12Z,chat-mentions,4
+2026-10-31T19:29:12Z,gp-per-xp,
+2026-10-31T19:29:12Z,why-lag,596
