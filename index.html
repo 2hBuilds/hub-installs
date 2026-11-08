@@ -216,15 +216,17 @@ function totalChange(series, slugs, lastDate, days) {
 	return then.every(n => n === null) ? null : sum(slugs.map(s => series[s][lastDate])) - sum(then);
 }
 
-// The card ahead of the plugins when two or more are shown: the live figures added up when every
-// plugin has one, else the recorded figures of the last date. No Hub rank, that is per plugin.
-// Its "Live change, 24 hours" adds up the plugins' own, and is blank unless every plugin has one.
+// The card ahead of the plugins when two or more are shown: the live figures added up when there is
+// a live read (a plugin not in the feed yet counts as 0), else the recorded figures of the last date.
+// No Hub rank, that is per plugin. Its "Live change, 24 hours" adds up the plugins that have one,
+// and is blank only when none has.
 function totalCard(series, slugs, lastDate, current, days) {
 	const now = sum(slugs.map(s => series[s][lastDate]));
-	const liveSum = current && slugs.every(s => current.counts.has(s)) ? sum(slugs.map(s => current.counts.get(s))) : null;
-	const day = days.every(d => d) ? {
-		value: sum(days.map(d => d.value)), live: days.every(d => d.live), inexact: days.some(d => d.inexact),
-		from: Math.min(...days.map(d => d.from)), to: Math.max(...days.map(d => d.to))
+	const liveSum = current && slugs.some(s => current.counts.has(s)) ? sum(slugs.map(s => current.counts.get(s))) : null;
+	const known = days.filter(d => d);
+	const day = known.length ? {
+		value: sum(known.map(d => d.value)), live: known.every(d => d.live), inexact: known.some(d => d.inexact),
+		from: Math.min(...known.map(d => d.from)), to: Math.max(...known.map(d => d.to))
 	} : null;
 	const card = document.createElement("section");
 	card.className = "card";
