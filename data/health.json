@@ -1,5 +1,5 @@
 {
- "checkedAt": "2026-11-10T11:07:25Z",
+ "checkedAt": "2026-11-10T20:57:44Z",
  "version": "1.13.6",
  "versionSince": "2026-11-03T09:55:52Z",
  "plugins": [
@@ -17,7 +17,7 @@
    "slug": "ca-boss-checklist",
    "name": "2h CA Boss Checklist",
    "author": "2hBuilds",
-   "version": "0.0.1",
+   "version": "0.0.2",
    "status": "ok",
    "reason": null,
    "since": "2026-11-10T04:45:02Z",
@@ -41,6 +41,16 @@
    "status": "ok",
    "reason": null,
    "since": "2026-10-29T05:55:42Z",
+   "warning": null
+  },
+  {
+   "slug": "inventory-quick-check",
+   "name": "2h Inventory Setups Quick Check",
+   "author": "2hBuilds",
+   "version": "1.0.0",
+   "status": "ok",
+   "reason": null,
+   "since": "2026-11-10T20:57:44Z",
    "warning": null
   },
   {
