@@ -7,3 +7,4 @@ why-lag
 chat-mentions
 gp-per-xp
 ca-boss-checklist
+inventory-quick-check
