@@ -1,5 +1,5 @@
 {
- "checkedAt": "2026-11-12T11:01:14Z",
+ "checkedAt": "2026-11-13T02:03:23Z",
  "version": "1.13.6",
  "versionSince": "2026-11-03T09:55:52Z",
  "plugins": [
@@ -47,7 +47,7 @@
    "slug": "inventory-quick-check",
    "name": "2h Inventory Setups Quick Check",
    "author": "2hBuilds",
-   "version": "1.0.2",
+   "version": "1.0.3",
    "status": "ok",
    "reason": null,
    "since": "2026-11-10T20:57:44Z",
