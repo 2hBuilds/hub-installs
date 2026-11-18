@@ -1,5 +1,5 @@
 {
- "checkedAt": "2026-11-17T11:47:46Z",
+ "checkedAt": "2026-11-18T04:39:42Z",
  "version": "1.13.6",
  "versionSince": "2026-11-03T09:55:52Z",
  "plugins": [
@@ -51,6 +51,16 @@
    "status": "ok",
    "reason": null,
    "since": "2026-11-10T20:57:44Z",
+   "warning": null
+  },
+  {
+   "slug": "timed-tiles",
+   "name": "2h Timed Tiles",
+   "author": "2hBuilds",
+   "version": "1.0.1",
+   "status": "ok",
+   "reason": null,
+   "since": "2026-11-18T04:39:42Z",
    "warning": null
   },
   {
