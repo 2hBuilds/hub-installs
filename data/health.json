@@ -1,7 +1,7 @@
 {
- "checkedAt": "2026-11-18T04:39:42Z",
- "version": "1.13.6",
- "versionSince": "2026-11-03T09:55:52Z",
+ "checkedAt": "2026-11-18T11:36:31Z",
+ "version": "1.13.7",
+ "versionSince": "2026-11-18T11:36:31Z",
  "plugins": [
   {
    "slug": "bank-portfolio-tracker",
@@ -15,9 +15,9 @@
   },
   {
    "slug": "ca-boss-checklist",
-   "name": "2h CA Boss Checklist",
+   "name": "2h Combat Achievements",
    "author": "2hBuilds",
-   "version": "0.0.5",
+   "version": "0.0.6",
    "status": "ok",
    "reason": null,
    "since": "2026-11-10T04:45:02Z",
