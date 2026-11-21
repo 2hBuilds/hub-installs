@@ -1,5 +1,5 @@
 {
- "checkedAt": "2026-11-20T11:32:41Z",
+ "checkedAt": "2026-11-21T10:57:32Z",
  "version": "1.13.7",
  "versionSince": "2026-11-18T11:36:31Z",
  "plugins": [
@@ -41,6 +41,16 @@
    "status": "ok",
    "reason": null,
    "since": "2026-10-29T05:55:42Z",
+   "warning": null
+  },
+  {
+   "slug": "crowd-alarm",
+   "name": "2h Crowd Alarm",
+   "author": "2hBuilds",
+   "version": "0.0.1",
+   "status": "ok",
+   "reason": null,
+   "since": "2026-11-21T10:57:32Z",
    "warning": null
   },
   {
