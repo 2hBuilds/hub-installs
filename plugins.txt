@@ -9,3 +9,4 @@ gp-per-xp
 ca-boss-checklist
 inventory-quick-check
 timed-tiles
+crowd-alarm
