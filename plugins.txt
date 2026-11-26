@@ -10,3 +10,4 @@ ca-boss-checklist
 inventory-quick-check
 timed-tiles
 crowd-alarm
+chatbox-controller
