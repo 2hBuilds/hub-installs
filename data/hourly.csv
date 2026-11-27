@@ -1,13 +1,4 @@
 time,plugin,installs
-2026-11-25T03:07:37Z,bank-portfolio-tracker,263
-2026-11-25T03:07:37Z,ca-boss-checklist,33
-2026-11-25T03:07:37Z,chat-hover-info,95
-2026-11-25T03:07:37Z,chat-mentions,22
-2026-11-25T03:07:37Z,crowd-alarm,10
-2026-11-25T03:07:37Z,gp-per-xp,
-2026-11-25T03:07:37Z,inventory-quick-check,20
-2026-11-25T03:07:37Z,timed-tiles,7
-2026-11-25T03:07:37Z,why-lag,2247
 2026-11-25T13:23:15Z,bank-portfolio-tracker,274
 2026-11-25T13:23:15Z,ca-boss-checklist,34
 2026-11-25T13:23:15Z,chat-hover-info,97
@@ -56,3 +47,13 @@ time,plugin,installs
 2026-11-27T00:44:32Z,inventory-quick-check,19
 2026-11-27T00:44:32Z,timed-tiles,9
 2026-11-27T00:44:32Z,why-lag,2281
+2026-11-27T10:02:12Z,bank-portfolio-tracker,277
+2026-11-27T10:02:12Z,ca-boss-checklist,45
+2026-11-27T10:02:12Z,chat-hover-info,100
+2026-11-27T10:02:12Z,chat-mentions,27
+2026-11-27T10:02:12Z,chatbox-controller,5
+2026-11-27T10:02:12Z,crowd-alarm,21
+2026-11-27T10:02:12Z,gp-per-xp,
+2026-11-27T10:02:12Z,inventory-quick-check,20
+2026-11-27T10:02:12Z,timed-tiles,9
+2026-11-27T10:02:12Z,why-lag,2355
