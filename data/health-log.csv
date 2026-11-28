@@ -18,3 +18,4 @@ time,plugin,from,to,detail
 2026-11-23T22:52:06Z,runelite,1.13.7,1.13.8,
 2026-11-26T04:49:58Z,chatbox-controller,,ok,version 1.0.0
 2026-11-28T02:07:45Z,why-lag,ok,pending,not in the Plugin Hub manifest for RuneLite 1.13.8 - checking again next run
+2026-11-28T10:46:11Z,why-lag,pending,missing,not in the Plugin Hub manifest for RuneLite 1.13.8
